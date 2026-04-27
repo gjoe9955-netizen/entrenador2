@@ -1,0 +1,29 @@
+name: Auditoria de Pronosticos
+
+on:
+  schedule:
+    # Se ejecuta todos los días a las 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Esto permite que tú lo ejecutes manualmente desde GitHub si quieres
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias
+        run: |
+          pip install requests python-dotenv
+
+      - name: Ejecutar Verificador
+        env:
+          GITHUB_TOKEN: ${{ secrets.BOT_REPO_TOKEN }}
+          FOOTBALL_API_KEY: ${{ secrets.FOOTBALL_API_KEY }}
+        run: python verificador.py
