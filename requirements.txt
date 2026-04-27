@@ -1,4 +1,5 @@
 pyTelegramBotAPI
+aiohttp
 google-generativeai
 requests
 pandas
