@@ -1,73 +1,78 @@
-import google.generativeai as genai
 import json
-import os
+import numpy as np
 from scipy.stats import poisson
 
-# Configuración (Usa tu clave real o variable de entorno)
-GEMINI_KEY = os.getenv("GEMINI_KEY")
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+def ajuste_dixon_coles(x, y, lh, la, rho=-0.15):
+    """Ajuste de correlación para marcadores bajos."""
+    if x == 0 and y == 0: return 1 - (lh * la * rho)
+    if x == 0 and y == 1: return 1 + (lh * rho)
+    if x == 1 and y == 0: return 1 + (la * rho)
+    if x == 1 and y == 1: return 1 - rho
+    return 1.0
 
-def obtener_analisis_ia(local, visitante, data_poisson):
-    # Prompt de alto nivel sincronizado con el Bot
-    prompt = f"""
-Actúa como un Senior Tipster experto en LaLiga con 20 años de experiencia en análisis estadístico.
-Tu objetivo es realizar un análisis técnico para inversores deportivos.
-
-DATOS DEL PARTIDO:
-⚽ Encuentro: {local} vs {visitante}
-📊 Expectativa de Goles (Lambda): {local} ({data_poisson['lambda_h']:.2f}) | {visitante} ({data_poisson['lambda_a']:.2f})
-📈 Probabilidades Poisson: Victoria Local {data_poisson['prob_h']*100:.1f}%, Empate {data_poisson['prob_d']*100:.2f}%, Victoria Visitante {data_poisson['prob_a']*100:.2f}%
-
-ESTRUCTURA DE RESPUESTA:
-1️⃣ **EL OJO DEL EXPERTO**: Análisis técnico de las probabilidades.
-2️⃣ **MARCADOR PROBABLE**: Escenario exacto basado en Lambda.
-3️⃣ **PICK DE VALOR**: Mercado recomendado.
-4️⃣ **STAKE/CONFIANZA**: [1 al 10]
-
-Finaliza con:
-PICK_RESUMEN: [4 palabras clave en mayúsculas]
-"""
-    
-    response = model.generate_content(prompt)
-    return response.text
-
-def predecir_con_ia(local_q, visitante_q):
-    with open('modelo_poisson.json', 'r') as f:
-        full_data = json.load(f)
-    
-    data = full_data["LaLiga"]
-    teams = data['teams']
-    
-    # Búsqueda flexible de equipos
-    m_l = next((t for t in teams if local_q.lower() in t.lower()), None)
-    m_v = next((t for t in teams if visitante_q.lower() in t.lower()), None)
-    
-    if not m_l or not m_v:
-        print("❌ Error: Uno o ambos equipos no están en el modelo.")
+def test_motor(local, visitante):
+    # 1. Cargar el motor generado por trainer.py
+    try:
+        with open('modelo_poisson.json', 'r') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print("❌ Error: modelo_poisson.json no encontrado.")
         return
 
-    stats_l = teams[m_l]
-    stats_v = teams[m_v]
-    avg = data['averages']
+    # 2. Extraer datos (asegurando la estructura de LaLiga)
+    try:
+        stats = data['LaLiga']['teams']
+        avg = data['LaLiga']['averages']
+        
+        s_l = stats[local]
+        s_v = stats[visitante]
+    except KeyError as e:
+        print(f"❌ Error: El equipo {e} no existe en el modelo actual.")
+        return
+
+    # 3. Calcular Lambdas (Goles esperados)
+    lh = s_l['att_h'] * s_v['def_a'] * avg['league_home']
+    la = s_v['att_a'] * s_l['def_h'] * avg['league_away']
     
-    # Cálculos de Poisson
-    lh = stats_l['att_h'] * stats_v['def_a'] * avg['league_home']
-    la = stats_v['att_a'] * stats_l['def_h'] * avg['league_away']
-    
+    print(f"\n📊 --- TEST DE PREDICCIÓN: {local} vs {visitante} ---")
+    print(f"⚽ Expectativa Local (Lambda H): {lh:.2f}")
+    print(f"⚽ Expectativa Visita (Lambda A): {la:.2f}")
+    print("-" * 45)
+
+    # 4. Calcular Probabilidades 1X2 con matriz 7x7
     ph, pd, pa = 0, 0, 0
-    for x in range(9):
-        for y in range(9):
-            p = poisson.pmf(x, lh) * poisson.pmf(y, la)
+    over25 = 0
+    
+    for x in range(7):
+        for y in range(7):
+            # Aplicamos Poisson + Dixon-Coles
+            p = (poisson.pmf(x, lh) * poisson.pmf(y, la)) * ajuste_dixon_coles(x, y, lh, la)
+            
             if x > y: ph += p
             elif x == y: pd += p
             else: pa += p
+            
+            if (x + y) > 2.5: over25 += p
 
-    datos_partido = {'lambda_h': lh, 'lambda_a': la, 'prob_h': ph, 'prob_d': pd, 'prob_a': pa}
+    print(f"🏠 Victoria {local}: {ph:.2%}")
+    print(f"🤝 Empate: {pd:.2%}")
+    print(f"🚀 Victoria {visitante}: {pa:.2%}")
+    print(f"📈 Over 2.5 Goles: {over25:.2%}")
+    print("-" * 45)
+
+    # 5. Marcadores más probables
+    scores = []
+    for x in range(4):
+        for y in range(4):
+            p = (poisson.pmf(x, lh) * poisson.pmf(y, la)) * ajuste_dixon_coles(x, y, lh, la)
+            scores.append((f"{x}-{y}", p))
     
-    analisis = obtener_analisis_ia(m_l, m_v, datos_partido)
-    print(analisis)
+    scores.sort(key=lambda x: x[1], reverse=True)
+    print("🎯 Top 3 Marcadores Probables:")
+    for i in range(3):
+        print(f"   {i+1}. {scores[i][0]} ({scores[i][1]:.2%})")
 
 if __name__ == "__main__":
-    # Prueba con nombres flexibles
-    predecir_con_ia("Real Madrid", "Barcelona")
+    # Puedes cambiar los nombres aquí para probar cualquier partido
+    # Asegúrate de usar los nombres exactos que vienen de football-data.org
+    test_motor("Real Madrid CF", "FC Barcelona")
