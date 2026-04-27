@@ -18,39 +18,39 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# Variables de Entorno
 TOKEN = os.getenv('TOKEN_TELEGRAM')
 GEMINI_KEY = os.getenv('GEMINI_KEY')
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN') 
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 FOOTBALL_DATA_KEY = os.getenv('FOOTBALL_DATA_KEY')
-
-URL_JSON = "https://raw.githubusercontent.com/gjoe9955-netizen/entrenador2/main/modelo_poisson.json"
 REPO_PATH = "gjoe9955-netizen/entrenador2"
 HISTORIAL_FILE = "historial_picks.json"
+URL_JSON = f"https://raw.githubusercontent.com/{REPO_PATH}/main/modelo_poisson.json"
 
 bot = AsyncTeleBot(TOKEN)
 genai.configure(api_key=GEMINI_KEY)
+config_ia = {"modelo_actual": "gemini-1.5-flash"} # Modelo por defecto
 
-# --- MOTOR DE MODELOS DINÁMICOS ---
-# Esto permite que el comando /test funcione probando nodos activos
-MODELS_TO_TEST = ["gemini-1.5-flash", "gemini-1.5-pro"]
+# --- EL MOTOR DE TEST ORIGINAL (RESTAURADO) ---
+async def obtener_modelos_reales(api_key):
+    try:
+        genai.configure(api_key=api_key)
+        aptos = []
+        # Lista los modelos disponibles en tu cuenta de Google AI
+        for m in genai.list_models():
+            nombre = m.name.split('/')[-1]
+            if 'generateContent' in m.supported_generation_methods:
+                if any(x in nombre.lower() for x in ['flash', 'pro', '1.5', '2.0']):
+                    try:
+                        test_model = genai.GenerativeModel(nombre)
+                        # Test rápido de respuesta
+                        await asyncio.to_thread(test_model.generate_content, "hi", generation_config={"max_output_tokens": 1})
+                        aptos.append(nombre)
+                    except: continue
+        aptos.sort(reverse=True)
+        return aptos[:6]
+    except: return []
 
-async def testear_modelos_ia():
-    results = []
-    for model_name in MODELS_TO_TEST:
-        try:
-            m = genai.GenerativeModel(model_name)
-            start = datetime.now()
-            m.generate_content("ping")
-            end = datetime.now()
-            latency = (end - start).total_seconds()
-            results.append({"model": model_name, "status": "✅ ONLINE", "latencia": f"{latency:.2f}s"})
-        except Exception:
-            results.append({"model": model_name, "status": "❌ OFFLINE", "latencia": "N/A"})
-    return results
-
-# --- Lógica Matemática ---
-
+# --- Lógica Matemática (Con Dixon-Coles) ---
 def ajuste_dixon_coles(x, y, lh, la, rho=-0.15):
     if x == 0 and y == 0: return 1 - (lh * la * rho)
     if x == 0 and y == 1: return 1 + (lh * rho)
@@ -61,10 +61,14 @@ def ajuste_dixon_coles(x, y, lh, la, rho=-0.15):
 def calcular_probabilidades(local, visitante, data):
     stats = data['LaLiga']['teams']
     avg = data['LaLiga']['averages']
-    s_l, s_v = stats[local], stats[visitante]
+    # Match flexible de nombres
+    m_l = next((t for t in stats if t.lower() in local.lower() or local.lower() in t.lower()), None)
+    m_v = next((t for t in stats if t.lower() in visitante.lower() or visitante.lower() in t.lower()), None)
     
-    lh = s_l['att_h'] * s_v['def_a'] * avg['league_home']
-    la = s_v['att_a'] * s_l['def_h'] * avg['league_away']
+    if not m_l or not m_v: return None
+    
+    lh = stats[m_l]['att_h'] * stats[m_v]['def_a'] * avg['league_home']
+    la = stats[m_v]['att_a'] * stats[m_l]['def_h'] * avg['league_away']
     
     ph, pd, pa = 0, 0, 0
     for x in range(7):
@@ -73,124 +77,70 @@ def calcular_probabilidades(local, visitante, data):
             if x > y: ph += p
             elif x == y: pd += p
             else: pa += p
-    return {"lh": lh, "la": la, "p_h": ph, "p_d": pd, "p_a": pa}
+    return {"lh": lh, "la": la, "ph": ph, "pd": pd, "pa": pa, "n_l": m_l, "n_v": m_v}
 
-def obtener_datos_poisson():
-    try:
-        r = requests.get(URL_JSON, timeout=10)
-        return r.json()
-    except: return None
-
-async def guardar_en_historial(partido, pick, analisis):
-    if not GITHUB_TOKEN: return
-    try:
-        url_gh = f"https://api.github.com/repos/{REPO_PATH}/contents/{HISTORIAL_FILE}"
-        headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-        r = requests.get(url_gh, headers=headers)
-        sha = r.json()['sha'] if r.status_code == 200 else None
-        content = json.loads(base64.b64decode(r.json()['content']).decode('utf-8')) if sha else []
-        
-        content.append({
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "partido": partido,
-            "pick_pronosticado": pick,
-            "analisis_resumen": analisis[:300] + "...",
-            "resultado_real": "Pendiente"
-        })
-        
-        new_b64 = base64.b64encode(json.dumps(content, indent=4, ensure_ascii=False).encode('utf-8')).decode('utf-8')
-        payload = {"message": f"Nuevo pick: {partido}", "content": new_b64, "sha": sha}
-        requests.put(url_gh, headers=headers, json=payload)
-    except Exception as e: logger.error(f"Error historial: {e}")
-
-# --- Handlers de Comandos ---
-
-@bot.message_handler(commands=['start'])
-async def cmd_start(message):
-    await bot.reply_to(message, "🚀 **Motor Poisson Activo**\n/predecir - Nuevo análisis\n/test - Test de Nodos IA\n/historial - Ver picks\n/help - Info técnica")
-
+# --- Handlers ---
 @bot.message_handler(commands=['test'])
 async def cmd_test(message):
-    sent = await bot.reply_to(message, "🔍 Testeando latencia de nodos Gemini...")
-    nodos = await testear_modelos_ia()
-    respuesta = "📊 **ESTADO DE NODOS IA:**\n\n"
-    for n in nodos:
-        respuesta += f"• `{n['model']}`: {n['status']} ({n['latencia']})\n"
-    await bot.edit_message_text(respuesta, message.chat.id, sent.message_id, parse_mode='Markdown')
-
-@bot.message_handler(commands=['help'])
-async def cmd_help(message):
-    help_text = """
-🛠 **SOPORTE TÉCNICO**
-• `/predecir`: Inicia motor Poisson + Dixon-Coles.
-• `/test`: Verifica qué modelo de Gemini responde más rápido.
-• `/historial`: Consulta resultados en GitHub.
-• `/equipos`: Lista de equipos cargados en el JSON.
-    """
-    await bot.reply_to(message, help_text, parse_mode='Markdown')
-
-@bot.message_handler(commands=['equipos'])
-async def cmd_equipos(message):
-    data = obtener_datos_poisson()
-    if data:
-        lista = "\n".join([f"• {t}" for t in sorted(data['LaLiga']['teams'].keys())])
-        await bot.reply_to(message, f"📋 **EQUIPOS EN SISTEMA:**\n\n{lista}", parse_mode='Markdown')
-
-@bot.message_handler(commands=['predecir'])
-async def cmd_predecir(message):
-    data = obtener_datos_poisson()
-    if not data:
-        await bot.reply_to(message, "❌ Error: No hay datos de Poisson disponibles.")
-        return
+    wait = await bot.reply_to(message, "🔍 Escaneando nodos disponibles...")
+    modelos = await obtener_modelos_reales(GEMINI_KEY)
+    await bot.delete_message(message.chat.id, wait.message_id)
+    if not modelos:
+        await bot.reply_to(message, "❌ No se encontraron nodos activos."); return
+    
     markup = InlineKeyboardMarkup()
-    teams = sorted(data['LaLiga']['teams'].keys())
-    for i in range(0, len(teams), 2):
-        row = [InlineKeyboardButton(teams[i], callback_query_data=f"L:{teams[i]}")]
-        if i+1 < len(teams): row.append(InlineKeyboardButton(teams[i+1], callback_query_data=f"L:{teams[i+1]}"))
-        markup.add(*row)
-    await bot.send_message(message.chat.id, "🏟 Selecciona el equipo **LOCAL**:", reply_markup=markup, parse_mode='Markdown')
+    for m in modelos:
+        markup.add(InlineKeyboardButton(f"Nodo: {m}", callback_data=f"set_{m}"))
+    await bot.send_message(message.chat.id, "🎯 **SELECCIONE MOTOR IA:**", reply_markup=markup, parse_mode='Markdown')
 
-@bot.callback_query_handler(func=lambda call: True)
-async def callback_query(call):
-    data = obtener_datos_poisson()
-    if call.data.startswith("L:"):
-        local = call.data.split(":")[1]
-        markup = InlineKeyboardMarkup()
-        teams = sorted(data['LaLiga']['teams'].keys())
-        for i in range(0, len(teams), 2):
-            t1, t2 = teams[i], teams[i+1] if i+1 < len(teams) else None
-            row = [InlineKeyboardButton(t1, callback_query_data=f"V:{local}:{t1}")]
-            if t2: row.append(InlineKeyboardButton(t2, callback_query_data=f"V:{local}:{t2}"))
-            markup.add(*row)
-        await bot.edit_message_text(f"🏠 Local: **{local}**\nSelecciona el **VISITANTE**:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+@bot.callback_query_handler(func=lambda call: call.data.startswith('set_'))
+async def cb_set_model(call):
+    config_ia["modelo_actual"] = call.data.split('_')[1]
+    await bot.edit_message_text(f"✅ **NODO SELECCIONADO:** `{config_ia['modelo_actual']}`", call.message.chat.id, call.message.message_id, parse_mode='Markdown')
 
-    elif call.data.startswith("V:"):
-        _, local, visitante = call.data.split(":")
-        sent = await bot.edit_message_text(f"⏳ Analizando con Dixon-Coles: {local} vs {visitante}...", call.message.chat.id, call.message.message_id)
-        res = calcular_probabilidades(local, visitante, data)
-        
-        # Selección automática del mejor modelo para la predicción
-        ia_model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Analista Pro LaLiga. Poisson: {local} vs {visitante}. Lambdas: H {res['lh']:.2f}, A {res['la']:.2f}. Probs: L {res['p_h']:.1%}, E {res['p_d']:.1%}, V {res['p_a']:.1%}. Da pick de Value y Marcador."
-        
-        try:
-            response = ia_model.generate_content(prompt)
-            await bot.edit_message_text(f"🏟 **{local} vs {visitante}**\n\n{response.text}", call.message.chat.id, sent.message_id, parse_mode='Markdown')
-            await guardar_en_historial(f"{local} vs {visitante}", "Análisis Pro", response.text)
-        except Exception as e:
-            await bot.edit_message_text(f"❌ Error en IA: {e}", call.message.chat.id, sent.message_id)
+@bot.message_handler(commands=['predecir', 'pronostico'])
+async def handle_analisis(message):
+    if not config_ia["modelo_actual"]:
+        await bot.reply_to(message, "⚠️ Usa `/test` para activar un nodo."); return
 
-@bot.message_handler(commands=['historial'])
-async def cmd_historial(message):
-    url_hist = f"https://raw.githubusercontent.com/{REPO_PATH}/main/{HISTORIAL_FILE}"
-    r = requests.get(url_hist)
-    if r.status_code == 200:
-        logs = r.json()[-5:]
-        texto = "📜 **ÚLTIMOS PICKS:**\n\n"
-        for l in logs: texto += f"• {l['partido']}: {l.get('resultado_real', 'Pendiente')}\n"
-        await bot.reply_to(message, texto, parse_mode='Markdown')
-    else: await bot.reply_to(message, "📭 Historial no encontrado.")
+    raw = message.text.replace("/predecir", "").replace("/pronostico", "").strip()
+    if " vs " not in raw:
+        await bot.reply_to(message, "⚠️ Formato: `Local vs Visitante`."); return
+
+    l_q, v_q = [t.strip() for t in raw.split(" vs ")]
+    r = requests.get(URL_JSON); data = r.json()
+    res = calcular_probabilidades(l_q, v_q, data)
+    
+    if not res:
+        await bot.reply_to(message, "❌ Equipo no encontrado."); return
+
+    sent = await bot.reply_to(message, f"📈 Analizando con `{config_ia['modelo_actual']}`...")
+
+    # --- EL PROMPT ORIGINAL (RESTAURADO) ---
+    try:
+        model = genai.GenerativeModel(config_ia["modelo_actual"])
+        prompt = f"""
+Actúa como experto en Value Betting. Cruza estos datos:
+PARTIDO: {res['n_l']} vs {res['n_v']}
+POISSON (Dixon-Coles): WinL {res['ph']*100:.1f}% | WinV {res['pa']*100:.1f}% | Empate {res['pd']*100:.1f}%
+LAMBDAS: Local {res['lh']:.2f} | Visita {res['la']:.2f}
+
+FORMATO:
+🔥 **ANÁLISIS DE VALOR:** [Análisis técnico basado en Lambdas]
+🎯 **PICK:** [Mercado recomendado]
+⚠️ **CONFIANZA:** [Nivel 1-10]
+💰 **MARCADOR EXACTO:** [Resultado]
+
+PICK_RESUMEN: [4 palabras clave]
+"""
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        await bot.edit_message_text(f"🏟 **{res['n_l']} vs {res['n_v']}**\n\n{response.text}", message.chat.id, sent.message_id, parse_mode='Markdown')
+    except Exception as e:
+        await bot.edit_message_text(f"❌ Error IA: {str(e)[:100]}", message.chat.id, sent.message_id)
+
+@bot.message_handler(commands=['start', 'help'])
+async def cmd_start(message):
+    await bot.reply_to(message, "⚽ **POISSON PRO**\n/test - Escanear Nodos\n/predecir Local vs Visitante\n/equipos - Ver lista")
 
 if __name__ == "__main__":
-    logger.info("🚀 Bot iniciado con motor de testeo...")
-    asyncio.run(bot.polling())
+    asyncio.run(bot.polling(non_stop=True))
