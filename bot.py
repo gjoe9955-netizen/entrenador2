@@ -40,7 +40,6 @@ genai.configure(api_key=GEMINI_KEY)
 config_ia = {"modelo_actual": None}
 
 # --- EL MOTOR DE TEST ORIGINAL (TAL CUAL) ---
-
 async def obtener_modelos_reales(api_key):
     try:
         genai.configure(api_key=api_key)
@@ -59,7 +58,6 @@ async def obtener_modelos_reales(api_key):
     except: return []
 
 # --- Funciones de Datos ---
-
 def obtener_datos_poisson():
     try:
         headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
@@ -85,8 +83,11 @@ def obtener_contexto_gratuito(local, visitante):
             nombre_busqueda = team_name.lower()
             for m in reversed(matches):
                 if len(racha) >= 5: break
-                h_name = (m['homeTeam']['shortName'] or m['homeTeam']['name']).lower()
-                a_name = (m['awayTeam']['shortName'] or m['awayTeam']['name']).lower()
+                h_team = m.get('homeTeam', {})
+                a_team = m.get('awayTeam', {})
+                h_name = (h_team.get('shortName') or h_team.get('name') or "").lower()
+                a_name = (a_team.get('shortName') or a_team.get('name') or "").lower()
+                
                 if nombre_busqueda in h_name or h_name in nombre_busqueda or nombre_busqueda in a_name or a_name in nombre_busqueda:
                     res = m['score']['fullTime']
                     if res['home'] == res['away']: racha.append("D")
@@ -162,7 +163,6 @@ def calcular_probabilidades(local, visitante):
     except: return None
 
 # --- Handlers ---
-
 @bot.message_handler(commands=['start', 'help'])
 async def cmd_help(message):
     await bot.reply_to(message, "⚽ **PREDICTOR MULTILIGA**\n🔍 `/test` | 📈 `/pronostico L vs V` | 📜 `/historial` | 🧠 `/modelo`", parse_mode='Markdown')
@@ -212,7 +212,6 @@ async def handle_analisis(message):
 
     try:
         model = genai.GenerativeModel(config_ia["modelo_actual"])
-        # PROMPT ORIGINAL
         prompt = f"""
 Actúa como experto en Value Betting. Cruza estos datos:
 PARTIDO: {res['n_l']} vs {res['n_v']}
@@ -231,9 +230,15 @@ PICK_RESUMEN: [4 palabras]
 """
         response = await asyncio.to_thread(model.generate_content, prompt)
         respuesta_ia = response.text
-        if "REPORTE DE DATOS" not in respuesta_ia: respuesta_ia = header_checks + respuesta_ia
+        if "REPORTE DE DATOS" not in respuesta_ia: 
+            respuesta_ia = header_checks + respuesta_ia
         
-        await bot.edit_message_text(respuesta_ia, message.chat.id, sent.message_id, parse_mode='Markdown')
+        # --- ENVÍO SEGURO ---
+        try:
+            await bot.edit_message_text(respuesta_ia, message.chat.id, sent.message_id, parse_mode='Markdown')
+        except:
+            await bot.edit_message_text(respuesta_ia, message.chat.id, sent.message_id, parse_mode=None)
+
         pick_compacto = respuesta_ia.split("PICK_RESUMEN:")[-1].strip().split('\n')[0][:50] if "PICK_RESUMEN:" in respuesta_ia else "No definido"
         await guardar_en_historial_github(f"{res['n_l']} vs {res['n_v']}", respuesta_ia, pick_compacto)
     except Exception as e:
