@@ -44,6 +44,7 @@ async def obtener_modelos_reales(api_key):
                 if any(x in nombre.lower() for x in ['flash', 'pro', '1.5', '2.0']):
                     try:
                         test_model = genai.GenerativeModel(nombre)
+                        # Test silencioso sin salida a pantalla
                         await asyncio.to_thread(test_model.generate_content, "hi", generation_config={"max_output_tokens": 1})
                         aptos.append(nombre)
                     except: continue
@@ -92,43 +93,19 @@ def obtener_cuotas_reales(local, visitante):
     if not ODDS_API_KEY: 
         logger.warning("[ODDS] No hay ODDS_API_KEY configurada.")
         return None
-    
-    # Endpoint v4 correcto: /v4/sports/{sport}/odds/
     ligas = ["soccer_spain_la_liga", "soccer_spain_segunda_division"]
-    
     try:
         for liga in ligas:
-            logger.info(f"[ODDS] Consultando API v4 para liga: {liga}")
             url = f"https://api.the-odds-api.com/v4/sports/{liga}/odds/"
-            params = {
-                "apiKey": ODDS_API_KEY,
-                "regions": "eu",
-                "markets": "h2h",
-                "oddsFormat": "decimal",
-                "dateFormat": "iso"
-            }
+            params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h", "oddsFormat": "decimal", "dateFormat": "iso"}
             r = requests.get(url, params=params, timeout=10)
-            
-            if r.status_code != 200:
-                logger.error(f"[ODDS] Error API {liga} ({r.status_code}): {r.text}")
-                continue
-                
+            if r.status_code != 200: continue
             data = r.json()
-            logger.info(f"[ODDS] Recibidos {len(data)} partidos de {liga}")
-            
             for match in data:
                 h_api, a_api = match['home_team'].lower(), match['away_team'].lower()
                 l_q, v_q = local.lower(), visitante.lower()
-                
-                # Log de comparación para detectar diferencias de nombre
-                logger.info(f"[ODDS] Comparando: [{l_q} vs {v_q}] con API: [{h_api} vs {a_api}]")
-                
                 if (l_q in h_api or h_api in l_q) and (v_q in a_api or a_api in v_q):
-                    if not match.get('bookmakers'):
-                        logger.warning(f"[ODDS] Partido hallado pero sin bookmakers activos.")
-                        continue
-
-                    logger.info(f"[ODDS] ✅ Match encontrado en {liga}")
+                    if not match.get('bookmakers'): continue
                     bookie = match['bookmakers'][0]
                     cuotas = bookie['markets'][0]['outcomes']
                     res_cuotas = {}
@@ -137,12 +114,8 @@ def obtener_cuotas_reales(local, visitante):
                         elif o['name'] == match['away_team']: res_cuotas['V'] = o['price']
                         else: res_cuotas['E'] = o['price']
                     return {"bookie": bookie['title'], "precios": res_cuotas}
-        
-        logger.warning(f"[ODDS] Fin de búsqueda. No se encontró {local} vs {visitante}")
         return None
-    except Exception as e:
-        logger.error(f"[ODDS] Error crítico en cuotas: {e}")
-        return None
+    except: return None
 
 # --- COMANDOS ---
 
@@ -150,12 +123,11 @@ def obtener_cuotas_reales(local, visitante):
 async def cmd_help(message):
     help_text = (
         "⚽ **SISTEMA DE PREDICCIÓN Y VALOR**\n\n"
-        "🔍 `/test` - Escanea y lista nodos de IA disponibles. **Debes usarlo primero.**\n"
-        "📈 `/pronostico Local vs Visitante` - Genera análisis completo cruzando Poisson, Rachas y Cuotas.\n"
-        "📋 `/equipos` - Muestra la lista de equipos aceptados por el modelo Poisson.\n"
-        "🧠 `/modelo` - Muestra qué nodo de IA tienes seleccionado actualmente.\n"
-        "📜 `/historial` - Muestra los últimos 5 pronósticos guardados en GitHub.\n\n"
-        "⚠️ *Nota: Escribe los nombres de los equipos tal cual aparecen en /equipos.*"
+        "🔍 `/test` - Escanea y lista nodos de IA disponibles.\n"
+        "📈 `/pronostico Local vs Visitante` - Genera análisis completo.\n"
+        "📋 `/equipos` - Muestra la lista de equipos aceptados.\n"
+        "🧠 `/modelo` - Nodo activo.\n"
+        "📜 `/historial` - Últimos 5 pronósticos."
     )
     await bot.reply_to(message, help_text, parse_mode='Markdown')
 
@@ -176,20 +148,6 @@ async def cb_set_model(call):
     config_ia["modelo_actual"] = call.data.split('_')[1]
     await bot.edit_message_text(f"✅ **NODO SELECCIONADO:** `{config_ia['modelo_actual']}`", call.message.chat.id, call.message.message_id, parse_mode='Markdown')
 
-@bot.message_handler(commands=['modelo'])
-async def cmd_modelo(message):
-    status = f"`{config_ia['modelo_actual']}`" if config_ia["modelo_actual"] else "Ninguno. Usa /test"
-    await bot.reply_to(message, f"🧠 **Nodo activo:** {status}", parse_mode='Markdown')
-
-@bot.message_handler(commands=['equipos'])
-async def cmd_equipos(message):
-    data = obtener_datos_poisson()
-    if data:
-        equipos = sorted(data['LaLiga']['teams'].keys())
-        await bot.reply_to(message, f"📋 **Equipos en el modelo:**\n`{', '.join(equipos)}`", parse_mode='Markdown')
-    else:
-        await bot.reply_to(message, "❌ No se pudo cargar la lista de equipos.")
-
 @bot.message_handler(commands=['pronostico', 'valor'])
 async def handle_analisis(message):
     if not config_ia["modelo_actual"]:
@@ -209,8 +167,9 @@ async def handle_analisis(message):
     m_v = next((t for t in data_liga['teams'] if t.lower() in v_q.lower() or v_q.lower() in t.lower()), None)
     
     if not m_l or not m_v:
-        await bot.reply_to(message, "❌ Equipo no hallado. Mira `/equipos`."); return
+        await bot.reply_to(message, "❌ Equipo no hallado."); return
 
+    # Cálculos Poisson
     l_s, v_s = data_liga['teams'][m_l], data_liga['teams'][m_v]
     avg = data_liga['averages']
     lh = l_s['att_h'] * v_s['def_a'] * avg['league_home']
@@ -224,28 +183,50 @@ async def handle_analisis(message):
             else: pa += p
 
     sent = await bot.reply_to(message, f"📈 Analizando {m_l} vs {m_v}...")
-    
     contexto = obtener_contexto_gratuito(m_l, m_v)
     cuotas_data = obtener_cuotas_reales(m_l, m_v)
-    texto_cuotas = f"L: {cuotas_data['precios'].get('L')} | E: {cuotas_data['precios'].get('E')} | V: {cuotas_data['precios'].get('V')}" if cuotas_data else "No disponibles"
+    
+    # Cálculo de Edge (Ventaja)
+    texto_cuotas = "No disponibles"
+    edge = 0
+    if cuotas_data:
+        texto_cuotas = f"L: {cuotas_data['precios'].get('L')} | E: {cuotas_data['precios'].get('E')} | V: {cuotas_data['precios'].get('V')}"
+        cuota_fav = cuotas_data['precios'].get('L') if ph > pa else cuotas_data['precios'].get('V')
+        prob_fav = max(ph, pa)
+        edge = (prob_fav * cuota_fav) - 1 if cuota_fav else 0
+
+    pepita_oro = "🏆 ¡PEPITA DE ORO ENCONTRADA!" if edge > 0.10 else ""
     header_checks = f"🛠 **REPORTE:** {'✅' if cuotas_data else '❌'} Cuotas | ✅ Poisson | ✅ Rachas\n"
 
     try:
         model = genai.GenerativeModel(config_ia["modelo_actual"])
         prompt = f"""
-Actúa como experto en Value Betting.
+Actúa como un Analista de Value Betting de Élite.
+Tu objetivo es identificar si la casa de apuestas ha cometido un error de cálculo.
+
 PARTIDO: {m_l} vs {m_v}
-POISSON: WinL {ph*100:.1f}%, Empate {pd*100:.1f}%, WinV {pa*100:.1f}%
-RACHAS: {contexto}
+POISSON: Local {ph*100:.1f}%, Empate {pd*100:.1f}%, Visitante {pa*100:.1f}%
+RACHAS (Momentum): {contexto}
 CUOTAS: {texto_cuotas}
+EDGE CALCULADO: {edge*100:.2f}%
+{pepita_oro}
+
+INSTRUCCIONES DE VALOR:
+- NIVEL BRONCE (Edge 1-5%): Valor marginal.
+- NIVEL PLATA (Edge 5-10%): Valor sólido.
+- NIVEL ORO (Edge > 10%): ¡PEPITA DE ORO! Discrepancia masiva.
+- NIVEL DIAMANTE (Edge > 10% Y Rachas a favor del pick): El Holy Grail.
+
+Define un STAKE (1 al 5) basado en la ventaja y el riesgo.
 
 FORMATO:
 {header_checks}
-🔥 **ANÁLISIS DE VALOR:** [Comparación Cuota vs Probabilidad]
+💎 **NIVEL:** [Nivel y Stake]
+🔥 **ANÁLISIS DE VALOR:** [Comparación detallada]
 ⚠️ **PUNTOS CIEGOS:** [Contradicciones entre Poisson y Forma]
 🎯 **PICK:** [Mercado Sugerido]
 💰 **CUOTA:** [Precio actual]
-⚠️ **CONFIANZA:** [Baja/Media/Alta]
+📊 **EDGE:** {edge*100:.2f}%
 
 PICK_RESUMEN: [4 palabras]
 """
@@ -273,7 +254,7 @@ async def cmd_historial(message):
                 texto += f"• `{l['fecha']}`: **{l['partido']}** -> {l.get('pick_pronosticado', 'N/A')}\n"
             await bot.reply_to(message, texto, parse_mode='Markdown')
         else:
-            await bot.reply_to(message, "📂 El historial aún está vacío.")
+            await bot.reply_to(message, "📂 El historial está vacío.")
     except:
         await bot.reply_to(message, "❌ Error al acceder al historial.")
 
