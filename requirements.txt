@@ -1,0 +1,7 @@
+pyTelegramBotAPI
+google-generativeai
+scipy
+pandas
+requests
+python-dotenv
+aiohttp
