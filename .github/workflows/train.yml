@@ -2,8 +2,8 @@ name: Entrenador Poisson España
 
 on:
   schedule:
-    - cron: '0 */12 * * *' # Se ejecuta cada 12 horas
-  workflow_dispatch:      # Permite ejecución manual desde la pestaña Actions
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,13 +14,15 @@ jobs:
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BOT_REPO_TOKEN }}
 
       - name: Configurar Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Instalar dependencias necesarias
+      - name: Instalar dependencias
         run: |
           pip install requests pandas numpy scipy
 
@@ -34,5 +36,4 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add modelo_poisson.json
-          # Solo hace commit si hay cambios reales en los datos
           git diff --quiet && git diff --staged --quiet || (git commit -m "Actualización: Datos Poisson con Time-Decay" && git push origin HEAD:main)
