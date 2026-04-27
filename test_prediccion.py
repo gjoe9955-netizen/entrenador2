@@ -1,41 +1,73 @@
+import google.generativeai as genai
 import json
+import os
 from scipy.stats import poisson
 
-def predecir_partido(local, visitante):
-    # 1. Cargar el motor que entrenamos
-    with open('modelo_poisson.json', 'r') as f:
-        data = json.load(f)
+# Configuración (Usa tu clave real o variable de entorno)
+GEMINI_KEY = os.getenv("GEMINI_KEY")
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+def obtener_analisis_ia(local, visitante, data_poisson):
+    # Prompt de alto nivel sincronizado con el Bot
+    prompt = f"""
+Actúa como un Senior Tipster experto en LaLiga con 20 años de experiencia en análisis estadístico.
+Tu objetivo es realizar un análisis técnico para inversores deportivos.
+
+DATOS DEL PARTIDO:
+⚽ Encuentro: {local} vs {visitante}
+📊 Expectativa de Goles (Lambda): {local} ({data_poisson['lambda_h']:.2f}) | {visitante} ({data_poisson['lambda_a']:.2f})
+📈 Probabilidades Poisson: Victoria Local {data_poisson['prob_h']*100:.1f}%, Empate {data_poisson['prob_d']*100:.2f}%, Victoria Visitante {data_poisson['prob_a']*100:.2f}%
+
+ESTRUCTURA DE RESPUESTA:
+1️⃣ **EL OJO DEL EXPERTO**: Análisis técnico de las probabilidades.
+2️⃣ **MARCADOR PROBABLE**: Escenario exacto basado en Lambda.
+3️⃣ **PICK DE VALOR**: Mercado recomendado.
+4️⃣ **STAKE/CONFIANZA**: [1 al 10]
+
+Finaliza con:
+PICK_RESUMEN: [4 palabras clave en mayúsculas]
+"""
     
-    # 2. Extraer datos del JSON
-    stats_local = data['teams'][local]
-    stats_visita = data['teams'][visitante]
+    response = model.generate_content(prompt)
+    return response.text
+
+def predecir_con_ia(local_q, visitante_q):
+    with open('modelo_poisson.json', 'r') as f:
+        full_data = json.load(f)
+    
+    data = full_data["LaLiga"]
+    teams = data['teams']
+    
+    # Búsqueda flexible de equipos
+    m_l = next((t for t in teams if local_q.lower() in t.lower()), None)
+    m_v = next((t for t in teams if visitante_q.lower() in t.lower()), None)
+    
+    if not m_l or not m_v:
+        print("❌ Error: Uno o ambos equipos no están en el modelo.")
+        return
+
+    stats_l = teams[m_l]
+    stats_v = teams[m_v]
     avg = data['averages']
     
-    # 3. Calcular la expectativa de goles (Lambda)
-    # Goles Local = Ataque Local * Defensa Visitante * Promedio Goles Casa Liga
-    lambda_h = stats_local['att_h'] * stats_visita['def_a'] * avg['league_home']
+    # Cálculos de Poisson
+    lh = stats_l['att_h'] * stats_v['def_a'] * avg['league_home']
+    la = stats_v['att_a'] * stats_l['def_h'] * avg['league_away']
     
-    # Goles Visitante = Ataque Visitante * Defensa Local * Promedio Goles Fuera Liga
-    lambda_a = stats_visita['att_a'] * stats_local['def_h'] * avg['league_away']
+    ph, pd, pa = 0, 0, 0
+    for x in range(9):
+        for y in range(9):
+            p = poisson.pmf(x, lh) * poisson.pmf(y, la)
+            if x > y: ph += p
+            elif x == y: pd += p
+            else: pa += p
+
+    datos_partido = {'lambda_h': lh, 'lambda_a': la, 'prob_h': ph, 'prob_d': pd, 'prob_a': pa}
     
-    print(f"--- Análisis: {local} vs {visitante} ---")
-    print(f"Expectativa de goles {local}: {lambda_h:.2f}")
-    print(f"Expectativa de goles {visitante}: {lambda_a:.2f}")
+    analisis = obtener_analisis_ia(m_l, m_v, datos_partido)
+    print(analisis)
 
-    # 4. Calcular Probabilidades (1X2)
-    prob_h, prob_d, prob_a = 0, 0, 0
-    for x in range(7): # Goles max local
-        for y in range(7): # Goles max visita
-            p = poisson.pmf(x, lambda_h) * poisson.pmf(y, lambda_a)
-            if x > y: prob_h += p
-            elif x == y: prob_d += p
-            else: prob_a += p
-
-    print(f"\nProbabilidades:")
-    print(f"Victoria {local}: {prob_h*100:.2f}%")
-    print(f"Empate: {prob_d*100:.2f}%")
-    print(f"Victoria {visitante}: {prob_a*100:.2f}%")
-
-# --- PRUEBA REAL ---
-# Nota: Usa los nombres exactos que aparecen en tu modelo_poisson.json
-# Ejemplo: predecir_partido("Real Madrid", "Barcelona")
+if __name__ == "__main__":
+    # Prueba con nombres flexibles
+    predecir_con_ia("Real Madrid", "Barcelona")
