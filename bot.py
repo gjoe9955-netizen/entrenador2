@@ -21,9 +21,10 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+# Variables de Entorno
 TOKEN = os.getenv('TOKEN_TELEGRAM')
 GEMINI_KEY = os.getenv('GEMINI_KEY')
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')  # Valor de tu BOT_REPO_TOKEN
 FOOTBALL_DATA_KEY = os.getenv('FOOTBALL_DATA_KEY')
 
 URL_JSON = "https://raw.githubusercontent.com/gjoe9955-netizen/entrenador2/main/modelo_poisson.json"
@@ -54,19 +55,16 @@ def calcular_probabilidades(local, visitante, data):
     s_l = stats[local]
     s_v = stats[visitante]
     
-    # Goles esperados (Lambdas)
+    # Goles esperados (Lambdas) con Time-Decay del trainer
     lh = s_l['att_h'] * s_v['def_a'] * avg['league_home']
     la = s_v['att_a'] * s_l['def_h'] * avg['league_away']
     
     prob_h, prob_d, prob_a = 0, 0, 0
-    matrix = []
     
-    # Generar matriz 6x6 (Dixon-Coles)
+    # Matriz 7x7 para mayor cobertura de goles
     for x in range(7):
         for y in range(7):
-            # Poisson base * Ajuste Dixon-Coles
             p = (poisson.pmf(x, lh) * poisson.pmf(y, la)) * ajuste_dixon_coles(x, y, lh, la)
-            
             if x > y: prob_h += p
             elif x == y: prob_d += p
             else: prob_a += p
@@ -116,13 +114,30 @@ async def guardar_en_historial(partido, pick, analisis):
 
 @bot.message_handler(commands=['start'])
 async def send_welcome(message):
-    await bot.reply_to(message, "⚽ **Calculadora Poisson Pro v2**\nUsa /predecir para analizar un partido de LaLiga.")
+    await bot.reply_to(message, "⚽ **Calculadora Poisson Pro v2**\nUsa /predecir para analizar un partido o /help para ver cómo funciona.")
+
+@bot.message_handler(commands=['help'])
+async def cmd_help(message):
+    help_text = """
+⚽ **GUÍA - POISSON PREDICTOR PRO**
+
+**Comandos:**
+/predecir - Inicia el análisis.
+/historial - Últimos 5 registros.
+/help - Esta guía.
+
+**Tecnología:**
+• **Time-Decay:** El modelo da más peso a los resultados recientes.
+• **Dixon-Coles:** Ajuste matemático para predecir mejor los empates.
+• **IA Gemini:** Analiza las probabilidades para encontrar el mejor 'Value'.
+    """
+    await bot.reply_to(message, help_text, parse_mode='Markdown')
 
 @bot.message_handler(commands=['predecir'])
 async def cmd_predecir(message):
     data = obtener_datos_poisson()
     if not data:
-        await bot.reply_to(message, "❌ No se pudo cargar el modelo.")
+        await bot.reply_to(message, "❌ No se pudo cargar el modelo desde GitHub.")
         return
     
     markup = InlineKeyboardMarkup()
@@ -133,35 +148,35 @@ async def cmd_predecir(message):
             row.append(InlineKeyboardButton(teams[i+1], callback_query_data=f"L:{teams[i+1]}"))
         markup.add(*row)
     
-    await bot.send_message(message.chat.id, "Selecciona el equipo **LOCAL**:", reply_markup=markup)
+    await bot.send_message(message.chat.id, "🏟 Selecciona el equipo **LOCAL**:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 async def callback_query(call):
     data = obtener_datos_poisson()
-    
+    if not data: return
+
     if call.data.startswith("L:"):
         local = call.data.split(":")[1]
         markup = InlineKeyboardMarkup()
         teams = sorted(data['LaLiga']['teams'].keys())
         for i in range(0, len(teams), 2):
-            t1, t2 = teams[i], teams[i+1] if i+1 < len(teams) else None
+            t1 = teams[i]
+            t2 = teams[i+1] if i+1 < len(teams) else None
             row = [InlineKeyboardButton(t1, callback_query_data=f"V:{local}:{t1}")]
             if t2: row.append(InlineKeyboardButton(t2, callback_query_data=f"V:{local}:{t2}"))
             markup.add(*row)
-        await bot.edit_message_text(f"Local: {local}\nAhora selecciona el **VISITANTE**:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+        await bot.edit_message_text(f"🏠 Local: **{local}**\nSelecciona el **VISITANTE**:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data.startswith("V:"):
         _, local, visitante = call.data.split(":")
         if local == visitante:
-            await bot.answer_callback_query(call.id, "¡No pueden ser el mismo equipo!")
+            await bot.answer_callback_query(call.id, "❌ No pueden ser el mismo equipo.")
             return
         
-        sent = await bot.edit_message_text(f"⏳ Analizando {local} vs {visitante}...", call.message.chat.id, call.message.message_id)
+        sent = await bot.edit_message_text(f"⏳ Procesando {local} vs {visitante}...", call.message.chat.id, call.message.message_id)
         
-        # Ejecutar lógica mejorada
         res = calcular_probabilidades(local, visitante, data)
         
-        # Consultar a la IA
         model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"""
         Actúa como analista Pro de LaLiga. Datos Poisson (Ajuste Dixon-Coles):
@@ -171,25 +186,40 @@ async def callback_query(call):
         - Probabilidades: Local {res['p_h']:.1%}, Empate {res['p_d']:.1%}, Visita {res['p_a']:.1%}
         
         Tarea:
-        1. Explica brevemente el favoritismo basado en esas Lambdas.
-        2. Indica el pick con más VALUE (compara probabilidades vs riesgo).
+        1. Explica el favoritismo brevemente.
+        2. Indica el pick con más VALUE.
         3. Da un marcador exacto.
-        Usa emojis, tono directo y profesional.
+        Tono directo, usa emojis.
         """
         
         try:
             response = model.generate_content(prompt)
             texto_final = f"🏟 **{local} vs {visitante}**\n\n{response.text}"
             await bot.edit_message_text(texto_final, call.message.chat.id, sent.message_id, parse_mode='Markdown')
-            await guardar_en_historial(f"{local} vs {visitante}", "Consultar análisis", response.text)
+            await guardar_en_historial(f"{local} vs {visitante}", "Análisis Generado", response.text)
         except Exception as e:
             await bot.edit_message_text(f"❌ Error IA: {e}", call.message.chat.id, sent.message_id)
 
 @bot.message_handler(commands=['historial'])
 async def cmd_historial(message):
-    # (Misma lógica de historial que ya tenías)
-    await bot.reply_to(message, "📜 Consultando historial en GitHub...")
+    try:
+        url_hist = f"https://raw.githubusercontent.com/{REPO_PATH}/main/{HISTORIAL_FILE}"
+        r = requests.get(url_hist, timeout=10)
+        if r.status_code == 200:
+            logs = r.json()[-5:] # Últimos 5
+            if not logs:
+                await bot.reply_to(message, "📭 Historial vacío.")
+                return
+            texto = "📜 **ÚLTIMOS PRONÓSTICOS:**\n\n"
+            for l in logs:
+                res = l.get('resultado_real', 'Pendiente')
+                texto += f"• `{l['fecha']}`: **{l['partido']}**\n  Result: `{res}`\n"
+            await bot.reply_to(message, texto, parse_mode='Markdown')
+        else:
+            await bot.reply_to(message, "📂 No se pudo acceder al historial.")
+    except Exception as e:
+        await bot.reply_to(message, f"❌ Error: {e}")
 
 if __name__ == "__main__":
-    logger.info("Bot iniciado...")
+    logger.info("🚀 Bot iniciado correctamente...")
     asyncio.run(bot.polling())
