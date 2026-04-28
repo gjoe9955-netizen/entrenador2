@@ -32,6 +32,30 @@ FILE_PATH = "historial.json"
 
 bot = AsyncTeleBot(TOKEN)
 
+# --- Diccionario de Mapeo: API/JSON -> CSV ---
+MAPEO_EQUIPOS = {
+    "Girona FC": "Girona",
+    "Rayo Vallecano de Madrid": "Vallecano",
+    "Villarreal CF": "Villarreal",
+    "Real Oviedo": "Oviedo",
+    "RCD Mallorca": "Mallorca",
+    "FC Barcelona": "Barcelona",
+    "Deportivo Alavés": "Alaves",
+    "Levante UD": "Levante",
+    "Valencia CF": "Valencia",
+    "Real Sociedad de Fútbol": "Sociedad",
+    "RC Celta de Vigo": "Celta",
+    "Getafe CF": "Getafe",
+    "Athletic Club": "Ath Bilbao",
+    "Sevilla FC": "Sevilla",
+    "RCD Espanyol de Barcelona": "Espanol",
+    "Club Atlético de Madrid": "Ath Madrid",
+    "Elche CF": "Elche",
+    "Real Betis Balompié": "Betis",
+    "Real Madrid CF": "Real Madrid",
+    "CA Osasuna": "Osasuna"
+}
+
 # --- Estado Global Dinámico ---
 SISTEMA_IA = {
     "estratega": {"api": None, "nodo": None},
@@ -46,7 +70,7 @@ SISTEMA_IA = {
     ]
 }
 
-# --- Motores de IA (Optimizado para ahorro de tokens y precisión) ---
+# --- Motores de IA ---
 async def ejecutar_ia(rol, prompt):
     config = SISTEMA_IA[rol]
     if not config["nodo"]: return None
@@ -55,11 +79,11 @@ async def ejecutar_ia(rol, prompt):
     g_key = os.getenv('GROQ_API_KEY') or os.getenv('GROQ_KEY')
     
     if config["api"] == 'SAMBA':
-        if not s_key: return "❌ Error: SAMBA_KEY no configurada en Railway."
+        if not s_key: return "❌ Error: SAMBA_KEY no configurada."
         base_url = "https://api.sambanova.ai/v1"
         api_key = s_key
     else:
-        if not g_key: return "❌ Error: GROQ_API_KEY no configurada en Railway."
+        if not g_key: return "❌ Error: GROQ_API_KEY no configurada."
         base_url = "https://api.groq.com/openai/v1"
         api_key = g_key
 
@@ -100,13 +124,11 @@ async def guardar_en_github(nuevo_registro=None, historial_completo=None):
     try:
         r = requests.get(url, headers=headers)
         sha = r.json()['sha'] if r.status_code == 200 else None
-        
         if historial_completo is None:
             historial = json.loads(base64.b64decode(r.json()['content']).decode('utf-8')) if r.status_code == 200 else []
             if nuevo_registro: historial.append(nuevo_registro)
         else:
             historial = historial_completo
-
         nuevo_contenido = base64.b64encode(json.dumps(historial, indent=4, ensure_ascii=False).encode('utf-8')).decode('utf-8')
         payload = {"message": "🤖 Actualización Historial", "content": nuevo_contenido, "sha": sha}
         requests.put(url, headers=headers, json=payload)
@@ -142,26 +164,33 @@ async def api_football_call(endpoint):
 async def obtener_h2h_directo(equipo_l, equipo_v):
     URL_CSV = "https://www.football-data.co.uk/mmz4281/2526/SP1.csv"
     try:
+        # 1. Obtener nombres del CSV vía Mapeo
+        csv_l = MAPEO_EQUIPOS.get(equipo_l)
+        csv_v = MAPEO_EQUIPOS.get(equipo_v)
+
+        if not csv_l or not csv_v:
+            logging.warning(f"⚠️ Nombres no mapeados: {equipo_l} o {equipo_v}. Usando fallback...")
+            csv_l = equipo_l.split()[0]
+            csv_v = equipo_v.split()[0]
+
         r = await asyncio.to_thread(requests.get, URL_CSV, timeout=10)
         if r.status_code != 200: return "Error CSV.", False
         
         df = pd.read_csv(io.StringIO(r.text))
         
-        # --- Búsqueda Flexible de Nombres ---
-        root_l = equipo_l.split()[0].lower()[:4]
-        root_v = equipo_v.split()[0].lower()[:4]
-
+        # 2. Búsqueda Exacta para evitar falsos positivos (Real vs Villarreal)
         mask = (
-            (df['HomeTeam'].str.lower().str.contains(root_l) & df['AwayTeam'].str.lower().str.contains(root_v)) |
-            (df['HomeTeam'].str.lower().str.contains(root_v) & df['AwayTeam'].str.lower().str.contains(root_l))
+            (df['HomeTeam'] == csv_l) & (df['AwayTeam'] == csv_v) |
+            (df['HomeTeam'] == csv_v) & (df['AwayTeam'] == csv_l)
         )
         h2h = df[mask]
         
-        if h2h.empty: return f"Sin H2H previo en CSV entre {equipo_l} y {equipo_v}.", False
+        if h2h.empty: 
+            return f"Sin H2H en CSV para {csv_l} vs {csv_v}.", False
         
         l, v, e = 0, 0, 0
         for _, row in h2h.iterrows():
-            is_l_home = root_l in row['HomeTeam'].lower()
+            is_l_home = (row['HomeTeam'] == csv_l)
             if row['FTR'] == 'H':
                 if is_l_home: l += 1
                 else: v += 1
@@ -190,14 +219,16 @@ async def handle_pronostico(message):
     try:
         raw_json = requests.get(URL_JSON).json()
         liga = next(iter(raw_json))
+        
+        # Match de nombres exactos usando el JSON
         m_l = next((t for t in raw_json[liga]['teams'] if t.lower() in l_q.lower() or l_q.lower() in t.lower()), None)
         m_v = next((t for t in raw_json[liga]['teams'] if t.lower() in v_q.lower() or v_q.lower() in t.lower()), None)
 
         if not m_l or not m_v:
             await bot.edit_message_text("❌ Equipos no coinciden con el JSON.", message.chat.id, msg_espera.message_id); return
 
-        c_l, c_e, c_v, check_odds = await obtener_datos_mercado(l_q)
-        h2h_str, check_h2h = await obtener_h2h_directo(l_q, v_q)
+        c_l, c_e, c_v, check_odds = await obtener_datos_mercado(m_l)
+        h2h_str, check_h2h = await obtener_h2h_directo(m_l, m_v)
 
         l_stats, v_stats = raw_json[liga]['teams'][m_l], raw_json[liga]['teams'][m_v]
         avg = raw_json[liga]['averages']
@@ -226,34 +257,29 @@ async def handle_pronostico(message):
         }))
 
         header = f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | ✅ Poisson ({ph*100:.1f}%) | {'✅' if check_h2h else '❌'} H2H (CSV)\n{'—'*20}\n"
-        
         prompt_e = (
             f"Analiza el partido {m_l} vs {m_v}.\n"
             f"- Probabilidad Poisson: {ph*100:.1f}%\n"
-            f"- Cuota Mercado: {c_l} (implica {1/c_l*100:.1f}%)\n"
             f"- Datos H2H (CSV): {h2h_str}\n"
             f"- Ventaja (Edge): {edge*100:.1f}%\n"
-            f"- Stake Recomendado: {stake}%\n"
-            "Compara si la tendencia del H2H en el CSV valida el modelo Poisson o lo contradice."
+            f"- Stake: {stake}%\n"
+            "Valida si el H2H apoya la proyeccion Poisson."
         )
         
         analisis = await ejecutar_ia("estratega", prompt_e)
         res_final = f"{header}{analisis}\n\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
 
         if SISTEMA_IA["auditor"]["nodo"]:
-            audit_prompt = (
-                f"Analiza coherencia: Edge {edge*100:.1f}% vs Stake {stake}%.\n"
-                f"Datos CSV: {h2h_str}\n"
-                f"Analisis del Estratega: {analisis}"
-            )
+            audit_prompt = f"Analiza: Edge {edge*100:.1f}% vs Stake {stake}%.\nCSV: {h2h_str}\nEstratega: {analisis}"
             auditoria = await ejecutar_ia("auditor", audit_prompt)
             res_final += f"\n\n🛡 **AUDITOR:**\n{auditoria}\n(`{SISTEMA_IA['auditor']['nodo']}`)"
 
         await bot.edit_message_text(res_final, message.chat.id, msg_espera.message_id, parse_mode='Markdown')
     except Exception as e:
-        await bot.edit_message_text(f"❌ Error crítico: {str(e)[:100]}", message.chat.id, msg_espera.message_id)
+        logging.error(f"Error Pronóstico: {e}")
+        await bot.edit_message_text(f"❌ Error crítico en el proceso.", message.chat.id, msg_espera.message_id)
 
-# --- Comandos Adicionales ---
+# --- Comandos base (Historial, Validar, Tabla, etc. se mantienen igual) ---
 @bot.message_handler(commands=['historial'])
 async def cmd_historial(message):
     url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
@@ -287,7 +313,7 @@ async def cmd_validar(message):
         if actualizados > 0:
             await guardar_en_github(historial_completo=historial)
             await bot.edit_message_text(f"✅ Se validaron {actualizados} picks.", message.chat.id, msg.message_id)
-        else: await bot.edit_message_text("ℹ️ Sin picks pendientes de validar.", message.chat.id, msg.message_id)
+        else: await bot.edit_message_text("ℹ️ Sin picks pendientes.", message.chat.id, msg.message_id)
     except: await bot.edit_message_text("❌ Error en validación.", message.chat.id, msg.message_id)
 
 @bot.message_handler(commands=['partidos'])
@@ -354,16 +380,16 @@ async def cb_fin(call): await bot.edit_message_text("🚀 **SISTEMA ACTIVADO**",
 
 @bot.message_handler(commands=['help'])
 async def cmd_help(message):
-    txt = ("🤖 **BOT ANALISTA V5.1**\n\n"
-           "• `/pronostico L vs V`: Probabilidad Poisson + Kelly + IA.\n"
-           "• `/historial`: Picks registrados en GitHub.\n"
+    txt = ("🤖 **BOT ANALISTA V5.2**\n\n"
+           "• `/pronostico L vs V`: Poisson + Kelly + H2H Exacto.\n"
+           "• `/historial`: Picks registrados.\n"
            "• `/validar`: Actualiza resultados reales.\n"
-           "• `/config`: Cambia entre SambaNova y Groq.\n"
-           "• `/partidos`: Próximos juegos (Hora Juárez).")
+           "• `/config`: Cambia IAs.\n"
+           "• `/partidos`: Próximos juegos.")
     await bot.reply_to(message, txt, parse_mode='Markdown')
 
 async def main():
-    logging.info("Bot Iniciado...")
+    logging.info("Bot Iniciado con Mapeo Exacto...")
     await bot.polling(non_stop=True)
 
 if __name__ == "__main__":
