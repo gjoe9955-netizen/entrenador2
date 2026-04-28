@@ -146,17 +146,22 @@ async def obtener_h2h_directo(equipo_l, equipo_v):
         if r.status_code != 200: return "Error CSV.", False
         
         df = pd.read_csv(io.StringIO(r.text))
+        
+        # --- Búsqueda Flexible de Nombres ---
+        root_l = equipo_l.split()[0].lower()[:4]
+        root_v = equipo_v.split()[0].lower()[:4]
+
         mask = (
-            ((df['HomeTeam'].str.contains(equipo_l[:5], case=False)) & (df['AwayTeam'].str.contains(equipo_v[:5], case=False))) |
-            ((df['HomeTeam'].str.contains(equipo_v[:5], case=False)) & (df['AwayTeam'].str.contains(equipo_l[:5], case=False)))
+            (df['HomeTeam'].str.lower().str.contains(root_l) & df['AwayTeam'].str.lower().str.contains(root_v)) |
+            (df['HomeTeam'].str.lower().str.contains(root_v) & df['AwayTeam'].str.lower().str.contains(root_l))
         )
         h2h = df[mask]
         
-        if h2h.empty: return "Sin H2H en CSV.", False
+        if h2h.empty: return f"Sin H2H previo en CSV entre {equipo_l} y {equipo_v}.", False
         
         l, v, e = 0, 0, 0
         for _, row in h2h.iterrows():
-            is_l_home = equipo_l.lower()[:4] in row['HomeTeam'].lower()
+            is_l_home = root_l in row['HomeTeam'].lower()
             if row['FTR'] == 'H':
                 if is_l_home: l += 1
                 else: v += 1
@@ -164,7 +169,7 @@ async def obtener_h2h_directo(equipo_l, equipo_v):
                 if is_l_home: v += 1
                 else: l += 1
             else: e += 1
-        return f"CSV H2H: Local {l} | Vis {v} | Emp {e}", True
+        return f"H2H Temp Actual: Local {l} | Vis {v} | Emp {e}", True
     except Exception as e:
         logging.error(f"H2H CSV Error: {e}")
         return "Error Procesando CSV.", False
@@ -220,10 +225,8 @@ async def handle_pronostico(message):
             "stake": f"{stake}%", "nivel": nivel, "status": "⏳ PENDIENTE"
         }))
 
-        # Encabezado corregido para mostrar el estado real del CSV
         header = f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | ✅ Poisson ({ph*100:.1f}%) | {'✅' if check_h2h else '❌'} H2H (CSV)\n{'—'*20}\n"
         
-        # Prompt de usuario mejorado con datos del CSV explícitos
         prompt_e = (
             f"Analiza el partido {m_l} vs {m_v}.\n"
             f"- Probabilidad Poisson: {ph*100:.1f}%\n"
@@ -238,7 +241,6 @@ async def handle_pronostico(message):
         res_final = f"{header}{analisis}\n\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
 
         if SISTEMA_IA["auditor"]["nodo"]:
-            # Auditoría con contexto del CSV
             audit_prompt = (
                 f"Analiza coherencia: Edge {edge*100:.1f}% vs Stake {stake}%.\n"
                 f"Datos CSV: {h2h_str}\n"
