@@ -119,5 +119,16 @@
         "stake": "0%",
         "nivel": "SIN VALOR ⚠️",
         "status": "⏳ PENDIENTE"
+    },
+    {
+        "fecha": "2026-04-28 00:14",
+        "partido": "Valencia CF vs Club Atlético de Madrid",
+        "pick": "No Bet",
+        "poisson": "37.4%",
+        "cuota": 1.96,
+        "edge": "-13.6%",
+        "stake": "0%",
+        "nivel": "SIN VALOR ⚠️",
+        "status": "⏳ PENDIENTE"
     }
 ]
