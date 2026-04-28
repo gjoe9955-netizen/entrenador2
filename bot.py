@@ -56,15 +56,20 @@ async def ejecutar_ia(rol, prompt):
 
     try:
         client = OpenAI(api_key=key, base_url=base_url)
+        # Ajuste de mensajes para compatibilidad total con Samba/Groq
         res = await asyncio.to_thread(
             client.chat.completions.create,
             model=config["nodo"],
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "Eres un experto analista deportivo senior y gestor de banca."},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.1
         )
         return res.choices[0].message.content
-    except:
-        return f"❌ Error en Nodo {config['api']}"
+    except Exception as e:
+        logging.error(f"Error en {config['api']}: {e}")
+        return f"❌ Error en Nodo {config['api']}: {str(e)[:50]}"
 
 # --- Persistencia en GitHub ---
 async def guardar_en_github(nuevo_registro=None, historial_completo=None):
@@ -175,6 +180,7 @@ async def handle_pronostico(message):
         p_percent = ph * 100
         prob_implied = 1 / c_l
         edge_real = ph - prob_implied
+        # Cálculo bajo Método Kelly (fracción 0.25)
         stake_final = round((((c_l * ph) - 1) / (c_l - 1)) * 0.25 * 100, 2) if edge_real > 0 else 0
         stake_final = max(0, min(stake_final, 5)) 
 
@@ -188,13 +194,14 @@ async def handle_pronostico(message):
         }))
 
         header = f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | ✅ Poisson ({p_percent:.1f}%) | {'✅' if check_h2h else '❌'} H2H\n{'—'*20}\n"
-        prompt_e = f"Analista Senior. Partido: {m_l} vs {m_v}. Poisson: {p_percent:.1f}%. Cuota: {c_l}. H2H: {h2h}. NIVEL: {nivel}. STAKE: {stake_final}%."
+        # Prompt enriquecido con Criterio de Kelly
+        prompt_e = f"Analiza: {m_l} vs {m_v}. Prob. Poisson: {p_percent:.1f}%. Cuota: {c_l}. H2H: {h2h}. Criterio de Kelly sugiere Stake: {stake_final}%. NIVEL: {nivel}. Justifica técnicamente."
         
         analisis = await ejecutar_ia("estratega", prompt_e)
         footer = f"\n\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
         
         if SISTEMA_IA["auditor"]["nodo"]:
-            auditoria = await ejecutar_ia("auditor", f"Auditor. Valida: '{analisis}'. Poisson: {p_percent:.1f}%. Reporta VEREDICTO.")
+            auditoria = await ejecutar_ia("auditor", f"Valida: '{analisis}'. Prob: {p_percent:.1f}%. Cuota: {c_l}. ¿Es coherente el Stake Kelly de {stake_final}%?")
             footer += f"\n🛡 **AUDITOR:** `{SISTEMA_IA['auditor']['api']}` ({SISTEMA_IA['auditor']['nodo']})"
             final = f"{header}{analisis}\n\n{auditoria}{footer}"
         else:
@@ -307,12 +314,14 @@ async def cb_fin(call): await bot.edit_message_text("🚀 **SISTEMA LISTO**", ca
 
 @bot.message_handler(commands=['help'])
 async def cmd_help(message):
-    txt = ("🤖 **BOT ANALISTA V5.1**\n\n"
-           "• `/pronostico L vs V`: Análisis completo.\n"
-           "• `/historial`: Historial de picks.\n"
-           "• `/validar`: Cierre de apuestas.\n"
-           "• `/config`: Nodos Samba/Groq.\n"
-           "• `/partidos`, `/tabla`, `/equipos`: Datos liga.")
+    txt = ("🤖 **BOT ANALISTA V5.1 - COMANDOS:**\n\n"
+           "• `/pronostico L vs V`: Genera análisis estadístico (Poisson), cálculo de valor (Value Bet) y gestión de banca (Criterio de Kelly).\n"
+           "• `/historial`: Muestra los últimos 10 pronósticos registrados en GitHub.\n"
+           "• `/validar`: Cruza el historial pendiente con resultados reales para marcar WIN/LOSS.\n"
+           "• `/config`: Menú interactivo para alternar entre APIs (SambaNova/Groq) y seleccionar modelos (DeepSeek, Llama 4, etc).\n"
+           "• `/partidos`: Próximos 10 partidos de LaLiga en hora local (Juárez).\n"
+           "• `/tabla`: Posiciones actuales de la competición.\n"
+           "• `/equipos`: Lista los nombres exactos requeridos por el motor Poisson.")
     await bot.reply_to(message, txt, parse_mode='Markdown')
 
 async def main(): await bot.polling(non_stop=True)
