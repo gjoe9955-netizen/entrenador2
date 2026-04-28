@@ -42,5 +42,16 @@
         "stake": "0%",
         "nivel": "CALLEJÓN SIN SALIDA ⚠️",
         "status": "⏳ EN ESPERA"
+    },
+    {
+        "fecha": "2026-04-27 21:56",
+        "partido": "Valencia CF vs Club Atlético de Madrid",
+        "pick": "No Bet",
+        "poisson": "37.2%",
+        "cuota": 1.96,
+        "edge": "-13.8%",
+        "stake": "0%",
+        "nivel": "CALLEJÓN SIN SALIDA ⚠️",
+        "status": "⏳ EN ESPERA"
     }
 ]
