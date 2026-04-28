@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           # Usamos el token interno de GitHub para tener permisos de escritura
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BOT_REPO_TOKEN }}
 
       - name: Configurar Python 3.10
         uses: actions/setup-python@v5
