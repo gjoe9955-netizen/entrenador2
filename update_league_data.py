@@ -34,6 +34,6 @@ def fetch_data():
 
 if __name__ == "__main__":
     if not API_KEY:
-        print("❌ Error: No se encontró la variable FOOTBALL_DATA_KEY")
+        print("❌ Error: No se encontró la variable API_KEY_FOOTBALL")
     else:
         fetch_data()
