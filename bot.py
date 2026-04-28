@@ -61,7 +61,7 @@ async def ejecutar_ia(rol, prompt):
             return r.json()['choices'][0]['message']['content']
         except: return "❌ Error en Nodo NVIDIA"
 
-# --- Núcleo Estadístico (CORREGIDO PARA MAPEOS) ---
+# --- Núcleo Estadístico y APIs ---
 async def obtener_datos_mercado(equipo_l):
     if not ODDS_API_KEY: return 1.85, 3.50, 4.00, False
     try:
@@ -111,7 +111,7 @@ async def obtener_h2h_directo(equipo_l, equipo_v):
         return "H2H: Sin datos directos.", False
     except: return "H2H: Error API.", False
 
-# --- Comandos de Análisis ---
+# --- Comando Principal: Pronóstico ---
 @bot.message_handler(commands=['pronostico', 'valor'])
 async def handle_pronostico(message):
     if not SISTEMA_IA["estratega"]["nodo"]:
@@ -122,7 +122,7 @@ async def handle_pronostico(message):
         await bot.reply_to(message, "⚠️ `/pronostico Local vs Visitante`."); return
 
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
-    msg_espera = await bot.reply_to(message, "📡 Consultando APIs Reales y Poisson...")
+    msg_espera = await bot.reply_to(message, "📡 Consultando APIs y Poisson...")
 
     # 1. Datos y Checks
     raw_json = requests.get(URL_JSON)
@@ -153,23 +153,42 @@ async def handle_pronostico(message):
             elif x == y: pd += p
             else: pa += p
 
-    p_local = ph * 100
-    edge = p_local - (100 / c_l)
+    # --- Ajuste Kelly y Niveles ---
+    p_win = ph 
+    p_percent = p_win * 100
+    prob_implied = 1 / c_l
+    edge_real = p_win - prob_implied
+    
+    if edge_real > 0:
+        kelly = ((c_l * p_win) - 1) / (c_l - 1)
+        stake_final = round(kelly * 0.25 * 100, 2)
+        stake_final = max(0, min(stake_final, 5)) 
+    else:
+        stake_final = 0
+
+    if edge_real > 0.05: nivel = "DIAMANTE 💎"
+    elif edge_real > 0.02: nivel = "ORO 🥇"
+    elif edge_real > 0: nivel = "PLATA 🥈"
+    else: nivel = "RIESGO ALTO / SIN VALOR ⚠️"
 
     # 3. Reporte
     header = (f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | "
-              f"{'✅' if check_json else '❌'} Poisson ({p_local:.1f}%) | "
+              f"{'✅' if check_json else '❌'} Poisson ({p_percent:.1f}%) | "
               f"{'✅' if check_h2h else '❌'} H2H\n"
               f"————————————————————\n")
     
-    prompt_e = (f"Analista Senior. Datos: {m_l} vs {m_v}. Poisson: {p_local:.1f}%. Cuota: {c_l}. H2H: {h2h}. Edge: {edge:.1f}%.\n"
-                f"Formato: NIVEL, STAKE, VALOR (4 líneas), PICK, CUOTA, EDGE.")
+    prompt_e = (
+        f"Analista Senior. Partido: {m_l} vs {m_v}.\n"
+        f"Poisson: {p_percent:.1f}%. Cuota: {c_l}. H2H: {h2h}.\n"
+        f"NIVEL: {nivel}. STAKE: {stake_final}%.\n\n"
+        f"Formato: NIVEL, STAKE, VALOR (4 líneas técnicas), PICK, CUOTA, EDGE."
+    )
     
     analisis = await ejecutar_ia("estratega", prompt_e)
     footer = f"\n\n{'—'*20}\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
 
     if SISTEMA_IA["auditor"]["nodo"]:
-        prompt_a = f"Auditor. Valida: '{analisis}'. Poisson: {p_local:.1f}%. Reporta VEREDICTO."
+        prompt_a = f"Auditor. Valida: '{analisis}'. Poisson: {p_percent:.1f}%. Reporta VEREDICTO."
         auditoria = await ejecutar_ia("auditor", prompt_a)
         footer += f"\n🛡 **AUDITOR:** `{SISTEMA_IA['auditor']['api']}` ({SISTEMA_IA['auditor']['nodo']})"
         final = f"{header}{analisis}\n\n{auditoria}{footer}"
@@ -178,7 +197,7 @@ async def handle_pronostico(message):
 
     await bot.edit_message_text(final, message.chat.id, msg_espera.message_id, parse_mode='Markdown')
 
-# --- Comandos Adicionales ---
+# --- Comandos de Información (REINTEGRADOS) ---
 @bot.message_handler(commands=['partidos'])
 async def cmd_partidos(message):
     data = await api_football_call("matches?status=SCHEDULED")
@@ -205,7 +224,7 @@ async def cmd_equipos(message):
     equipos = ", ".join([f"`{e}`" for e in res[liga]['teams'].keys()])
     await bot.reply_to(message, f"📋 **EQUIPOS JSON:**\n\n{equipos}", parse_mode='Markdown')
 
-# --- Gestión de Nodos ---
+# --- Gestión de Nodos y Configuración ---
 @bot.message_handler(commands=['config'])
 async def cmd_config(message):
     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🧠 ASIGNAR ESTRATEGA", callback_data="set_rol_estratega"))
@@ -245,15 +264,15 @@ async def cb_fin(call):
 @bot.message_handler(commands=['help'])
 async def cmd_help(message):
     help_text = (
-        "🤖 **SISTEMA V4.5 PRO**\n\n"
+        "🤖 **SISTEMA V4.6 PRO**\n\n"
         "📈 **ANÁLISIS:**\n"
-        "• `/pronostico Local vs Visitante`: Ejecuta Poisson + H2H Real + Cuotas API.\n"
+        "• `/pronostico Local vs Visitante`: Poisson + H2H + Cuotas.\n"
         "• `/config`: Configura los nodos Estratega y Auditor.\n\n"
-        "⚽ **DATOS:**\n"
-        "• `/partidos`: Próximos juegos ajustados a **Hora Cd. Juárez**.\n"
-        "• `/tabla`: Posiciones de La Liga.\n"
-        "• `/equipos`: Lista de nombres exactos para el modelo Poisson.\n\n"
-        "⚙️ **ESTADO:** El reporte muestra ✅ si la API respondió correctamente."
+        "⚽ **INFORMACIÓN:**\n"
+        "• `/partidos`: Juegos próximos (Hora Cd. Juárez).\n"
+        "• `/tabla`: Posiciones actuales de La Liga.\n"
+        "• `/equipos`: Equipos válidos en el JSON.\n\n"
+        "⚙️ **CÁLCULO:** Criterio de Kelly (1/4) para Stake y Nivelación por Edge."
     )
     await bot.reply_to(message, help_text, parse_mode='Markdown')
 
