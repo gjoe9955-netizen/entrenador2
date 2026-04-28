@@ -27,6 +27,6 @@ jobs:
       - name: Ejecutar Verificador
         env:
           # Nombres unificados para que todo el sistema conecte
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.BOT_REPO_TOKEN }}
           FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
         run: python verificador.py
