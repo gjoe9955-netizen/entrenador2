@@ -46,7 +46,7 @@ SISTEMA_IA = {
     ]
 }
 
-# --- Motores de IA (Blindado y Mapeado a Railway) ---
+# --- Motores de IA (Optimizado para ahorro de tokens y precisión) ---
 async def ejecutar_ia(rol, prompt):
     config = SISTEMA_IA[rol]
     if not config["nodo"]: return None
@@ -63,16 +63,30 @@ async def ejecutar_ia(rol, prompt):
         base_url = "https://api.groq.com/openai/v1"
         api_key = g_key
 
+    instrucciones = {
+        "estratega": (
+            "Eres un analista sintético. PROHIBIDO repetir datos del prompt. "
+            "Estilo: 'Bullet points'. Enfócate en la ventaja táctica y por qué el H2H valida o no a Poisson. "
+            "Máximo 100 palabras."
+        ),
+        "auditor": (
+            "Eres un Auditor de Riesgos. Prohibido saludar o definir conceptos. "
+            "Solo responde: ¿El stake es coherente con el Edge? ¿Hay sesgo en el Estratega? "
+            "Máximo 2 párrafos cortos."
+        )
+    }
+
     try:
         client = OpenAI(api_key=api_key, base_url=base_url)
         res = await asyncio.to_thread(
             client.chat.completions.create,
             model=config["nodo"],
             messages=[
-                {"role": "system", "content": "Eres un experto analista deportivo y gestor de banca senior. Tu tono es técnico y directo."},
+                {"role": "system", "content": instrucciones[rol]},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.1
+            temperature=0.1,
+            max_tokens=400
         )
         return res.choices[0].message.content
     except Exception as e:
@@ -126,14 +140,12 @@ async def api_football_call(endpoint):
     except: return None
 
 async def obtener_h2h_directo(equipo_l, equipo_v):
-    # URL del CSV de football-data.co.uk para La Liga (SP1)
     URL_CSV = "https://www.football-data.co.uk/mmz4281/2526/SP1.csv"
     try:
         r = await asyncio.to_thread(requests.get, URL_CSV, timeout=10)
         if r.status_code != 200: return "Error CSV.", False
         
         df = pd.read_csv(io.StringIO(r.text))
-        # Filtro flexible para nombres de equipos en el CSV
         mask = (
             ((df['HomeTeam'].str.contains(equipo_l[:5], case=False)) & (df['AwayTeam'].str.contains(equipo_v[:5], case=False))) |
             ((df['HomeTeam'].str.contains(equipo_v[:5], case=False)) & (df['AwayTeam'].str.contains(equipo_l[:5], case=False)))
@@ -208,16 +220,16 @@ async def handle_pronostico(message):
             "stake": f"{stake}%", "nivel": nivel, "status": "⏳ PENDIENTE"
         }))
 
-        header = f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | ✅ Poisson ({ph*100:.1f}%) | {'✅' if check_h2h else '✅' if 'CSV' in h2h_str else '❌'} H2H (CSV)\n{'—'*20}\n"
-        prompt_e = (f"Analiza: {m_l} vs {m_v}. Poisson: {ph*100:.1f}%. Cuota: {c_l}. "
-                    f"H2H: {h2h_str}. Edge: {edge*100:.1f}%. NIVEL: {nivel}. "
-                    f"Criterio Kelly sugiere Stake {stake}%. Justifica el valor de la apuesta.")
+        header = f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | ✅ Poisson ({ph*100:.1f}%) | {'✅' if check_h2h else '❌'} H2H (CSV)\n{'—'*20}\n"
+        
+        prompt_e = (f"Partido: {m_l}-{m_v}. Poisson: {ph*100:.1f}%. Cuota: {c_l}. H2H: {h2h_str}. "
+                    f"Edge: {edge*100:.1f}%. Stake Sugerido: {stake}%. Justifica brevemente.")
         
         analisis = await ejecutar_ia("estratega", prompt_e)
         res_final = f"{header}{analisis}\n\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
 
         if SISTEMA_IA["auditor"]["nodo"]:
-            audit_prompt = f"Audita este pick: '{analisis}'. Prob: {ph*100:.1f}%. ¿Es prudente el Stake de {stake}%?"
+            audit_prompt = f"Analiza coherencia: Edge {edge*100:.1f}% vs Stake {stake}%. Texto Estratega: {analisis}"
             auditoria = await ejecutar_ia("auditor", audit_prompt)
             res_final += f"\n\n🛡 **AUDITOR:**\n{auditoria}\n(`{SISTEMA_IA['auditor']['nodo']}`)"
 
@@ -225,7 +237,7 @@ async def handle_pronostico(message):
     except Exception as e:
         await bot.edit_message_text(f"❌ Error crítico: {str(e)[:100]}", message.chat.id, msg_espera.message_id)
 
-# --- Comandos Adicionales ---
+# --- Comandos Adicionales (Sin cambios) ---
 @bot.message_handler(commands=['historial'])
 async def cmd_historial(message):
     url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
@@ -288,7 +300,6 @@ async def cmd_equipos(message):
     equipos = ", ".join([f"`{e}`" for e in res[liga]['teams'].keys()])
     await bot.reply_to(message, f"📋 **EQUIPOS VÁLIDOS:**\n{equipos}", parse_mode='Markdown')
 
-# --- Menú de Configuración (Interactivo) ---
 @bot.message_handler(commands=['config'])
 async def cmd_config(message):
     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🧠 ASIGNAR ESTRATEGA", callback_data="set_rol_estratega"))
