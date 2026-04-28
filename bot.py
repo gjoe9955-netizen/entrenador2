@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
-TOKEN = os.getenv('TOKEN_BOT')
+TOKEN = os.getenv('TOKEN_TELEGRAM')
 # UNIFICACIÓN: Sincronizado con trainer.py y github actions
 FOOTBALL_DATA_KEY = os.getenv('API_KEY_FOOTBALL') 
 ODDS_API_KEY = os.getenv('API_KEY_ODDS')
