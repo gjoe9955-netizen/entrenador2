@@ -2,11 +2,11 @@ name: Entrenador Poisson España
 
 on:
   schedule:
-    - cron: '0 */12 * * *' # Corre cada 12 horas
-  workflow_dispatch: # Permite ejecutarlo manualmente desde GitHub
+    - cron: '0 */12 * * *' # Se ejecuta cada 12 horas automáticamente
+  workflow_dispatch:      # Te permite ejecutarlo manualmente con un botón
 
 permissions:
-  contents: write
+  contents: write         # NECESARIO para que pueda guardar el modelo_poisson.json
 
 jobs:
   build:
@@ -15,6 +15,7 @@ jobs:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
         with:
+          # Usamos el token interno de GitHub para tener permisos de escritura
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configurar Python 3.10
@@ -28,6 +29,7 @@ jobs:
 
       - name: Ejecutar el script Trainer
         env:
+          # Este nombre DEBE coincidir con el que pusiste en GitHub Secrets
           FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
         run: python trainer.py
 
@@ -36,4 +38,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add modelo_poisson.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Actualización: Datos Poisson" && git push origin HEAD:main)
+          # Solo hace el push si el archivo realmente cambió para no ensuciar el historial
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Actualización automática: Modelo Poisson" && git push origin HEAD:main)
