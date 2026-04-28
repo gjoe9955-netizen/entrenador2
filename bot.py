@@ -20,7 +20,8 @@ logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 TOKEN = os.getenv('TOKEN_TELEGRAM')
-FOOTBALL_DATA_KEY = os.getenv('FOOTBALL_DATA_KEY')
+# CORRECCIÓN: Nombre unificado según tus variables de Railway
+FOOTBALL_DATA_KEY = os.getenv('FOOTBALL_DATA_API_KEY') 
 ODDS_API_KEY = os.getenv('ODDS_API_KEY')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 
@@ -269,10 +270,13 @@ async def cmd_historial(message):
         txt = "📊 **RESUMEN DE OPERACIONES**\n"
         txt += f"{'—'*20}\n\n"
         for i in r[-7:]:
-            icon = "✅" if "WIN" in i['status'] else "❌" if "LOSS" in i['status'] else "➖" if "VOID" in i['status'] else "⏳"
+            # Sincronización con verificador: busca etiquetas completas
+            status_val = i.get('status', '⏳ PENDIENTE')
+            icon = "✅" if "WIN" in status_val or "REVISADO" in status_val else "❌" if "LOSS" in status_val else "➖" if "VOID" in status_val else "⏳"
             txt += f"{icon} **{i['partido']}**\n"
             txt += f"📅 `{i['fecha']}`\n"
             txt += f"🎯 **Pick:** `{i['pick']}` | 💰 **Stake:** `{i['stake']}`\n"
+            if i.get("marcador_real"): txt += f"⚽ **Resultado:** `{i['marcador_real']}`\n"
             txt += f"📈 **Nivel:** {i['nivel']}\n"
             txt += f"{'—'*18}\n"
         await bot.reply_to(message, txt, parse_mode='Markdown')
