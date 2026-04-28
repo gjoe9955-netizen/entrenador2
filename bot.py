@@ -3,6 +3,7 @@ import json
 import asyncio
 import logging
 import requests
+import base64
 from scipy.stats import poisson
 from datetime import datetime, timedelta
 
@@ -22,11 +23,40 @@ GEMINI_KEY = os.getenv('GEMINI_KEY')
 NVIDIA_KEY = os.getenv('NVIDIA_KEY')
 FOOTBALL_DATA_KEY = os.getenv('FOOTBALL_DATA_KEY')
 ODDS_API_KEY = os.getenv('ODDS_API_KEY')
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 
 OFFSET_JUAREZ = -6
 URL_JSON = "https://raw.githubusercontent.com/gjoe9955-netizen/entrenador2/main/modelo_poisson.json"
+REPO_OWNER = "gjoe9955-netizen"
+REPO_NAME = "entrenador2"
+FILE_PATH = "historial.json"
 
 bot = AsyncTeleBot(TOKEN)
+
+# --- Persistencia en GitHub ---
+async def guardar_en_github(nuevo_registro):
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FILE_PATH}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200:
+            data = r.json()
+            sha = data['sha']
+            historial = json.loads(base64.b64decode(data['content']).decode('utf-8'))
+        else:
+            historial, sha = [], None
+
+        historial.append(nuevo_registro)
+        nuevo_contenido = base64.b64encode(json.dumps(historial, indent=4, ensure_ascii=False).encode('utf-8')).decode('utf-8')
+        
+        payload = {
+            "message": f"🤖 Historial: {nuevo_registro['partido']}",
+            "content": nuevo_contenido,
+            "sha": sha
+        }
+        requests.put(url, headers=headers, json=payload)
+    except Exception as e:
+        logging.error(f"Error GitHub: {e}")
 
 # --- Estado Global ---
 SISTEMA_IA = {
@@ -124,7 +154,6 @@ async def handle_pronostico(message):
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
     msg_espera = await bot.reply_to(message, "📡 Consultando APIs y Poisson...")
 
-    # 1. Datos y Checks
     raw_json = requests.get(URL_JSON)
     full_data = raw_json.json()
     check_json = True if raw_json.status_code == 200 else False
@@ -132,7 +161,6 @@ async def handle_pronostico(message):
     c_l, c_e, c_v, check_odds = await obtener_datos_mercado(l_q)
     h2h, check_h2h = await obtener_h2h_directo(l_q, v_q)
 
-    # 2. Poisson
     liga = next(iter(full_data))
     m_l = next((t for t in full_data[liga]['teams'] if t.lower() in l_q.lower() or l_q.lower() in t.lower()), None)
     m_v = next((t for t in full_data[liga]['teams'] if t.lower() in v_q.lower() or v_q.lower() in t.lower()), None)
@@ -153,7 +181,6 @@ async def handle_pronostico(message):
             elif x == y: pd += p
             else: pa += p
 
-    # --- Ajuste Kelly y Niveles ---
     p_win = ph 
     p_percent = p_win * 100
     prob_implied = 1 / c_l
@@ -171,7 +198,18 @@ async def handle_pronostico(message):
     elif edge_real > 0: nivel = "PLATA 🥈"
     else: nivel = "RIESGO ALTO / SIN VALOR ⚠️"
 
-    # 3. Reporte
+    # Guardar en GitHub
+    asyncio.create_task(guardar_en_github({
+        "fecha": (datetime.utcnow() + timedelta(hours=OFFSET_JUAREZ)).strftime('%Y-%m-%d %H:%M'),
+        "partido": f"{m_l} vs {m_v}",
+        "poisson": f"{p_percent:.1f}%",
+        "cuota": c_l,
+        "edge": f"{edge_real*100:.1f}%",
+        "stake": f"{stake_final}%",
+        "nivel": nivel,
+        "pick": m_l if edge_real > 0 else "No Bet"
+    }))
+
     header = (f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | "
               f"{'✅' if check_json else '❌'} Poisson ({p_percent:.1f}%) | "
               f"{'✅' if check_h2h else '❌'} H2H\n"
@@ -197,7 +235,22 @@ async def handle_pronostico(message):
 
     await bot.edit_message_text(final, message.chat.id, msg_espera.message_id, parse_mode='Markdown')
 
-# --- Comandos de Información (REINTEGRADOS) ---
+# --- Comandos de Información ---
+@bot.message_handler(commands=['historial'])
+async def cmd_historial(message):
+    url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
+    try:
+        r = requests.get(url)
+        historial = r.json()
+        if not historial:
+            await bot.reply_to(message, "📭 Historial vacío."); return
+        txt = "📜 **HISTORIAL (GITHUB):**\n\n"
+        for r in historial[-8:]:
+            txt += f"📅 `{r['fecha']}`\n⚽ **{r['partido']}**\n🎯 Pick: `{r['pick']}` | Edge: `{r['edge']}` | Stake: `{r['stake']}`\n{'—'*15}\n"
+        await bot.reply_to(message, txt, parse_mode='Markdown')
+    except:
+        await bot.reply_to(message, "❌ No se pudo leer el historial de GitHub.")
+
 @bot.message_handler(commands=['partidos'])
 async def cmd_partidos(message):
     data = await api_football_call("matches?status=SCHEDULED")
@@ -224,7 +277,7 @@ async def cmd_equipos(message):
     equipos = ", ".join([f"`{e}`" for e in res[liga]['teams'].keys()])
     await bot.reply_to(message, f"📋 **EQUIPOS JSON:**\n\n{equipos}", parse_mode='Markdown')
 
-# --- Gestión de Nodos y Configuración ---
+# --- Gestión de Nodos ---
 @bot.message_handler(commands=['config'])
 async def cmd_config(message):
     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🧠 ASIGNAR ESTRATEGA", callback_data="set_rol_estratega"))
@@ -264,15 +317,13 @@ async def cb_fin(call):
 @bot.message_handler(commands=['help'])
 async def cmd_help(message):
     help_text = (
-        "🤖 **SISTEMA V4.6 PRO**\n\n"
+        "🤖 **SISTEMA V4.8 HISTORIC-GIT**\n\n"
         "📈 **ANÁLISIS:**\n"
-        "• `/pronostico Local vs Visitante`: Poisson + H2H + Cuotas.\n"
-        "• `/config`: Configura los nodos Estratega y Auditor.\n\n"
-        "⚽ **INFORMACIÓN:**\n"
-        "• `/partidos`: Juegos próximos (Hora Cd. Juárez).\n"
-        "• `/tabla`: Posiciones actuales de La Liga.\n"
-        "• `/equipos`: Equipos válidos en el JSON.\n\n"
-        "⚙️ **CÁLCULO:** Criterio de Kelly (1/4) para Stake y Nivelación por Edge."
+        "• `/pronostico Local vs Visitante`: Poisson + Kelly.\n"
+        "• `/historial`: Consulta los últimos registros en GitHub.\n"
+        "• `/config`: Nodos Estratega y Auditor.\n\n"
+        "⚽ **INFORMACIÓN:** `/partidos`, `/tabla`, `/equipos`.\n\n"
+        "💾 **PERSISTENCIA:** Repositorio GitHub Activo."
     )
     await bot.reply_to(message, help_text, parse_mode='Markdown')
 
