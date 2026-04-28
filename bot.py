@@ -20,6 +20,7 @@ logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 TOKEN = os.getenv('TOKEN_TELEGRAM')
+# UNIFICACIÓN: Sincronizado con trainer.py y github actions
 FOOTBALL_DATA_KEY = os.getenv('API_KEY_FOOTBALL')
 ODDS_API_KEY = os.getenv('API_KEY_ODDS')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
@@ -172,10 +173,12 @@ async def obtener_datos_mercado(equipo_l):
     except: pass
     return 1.85, 3.50, 4.00, False
 
-async def api_football_call(endpoint):
+async def api_football_call(endpoint, base_global=False):
     headers = {'X-Auth-Token': FOOTBALL_DATA_KEY}
+    url_base = "https://api.football-data.org/v4/"
+    path = f"matches?{endpoint}" if base_global else f"competitions/PD/{endpoint}"
     try:
-        r = await asyncio.to_thread(requests.get, f"https://api.football-data.org/v4/competitions/PD/{endpoint}", headers=headers, timeout=10)
+        r = await asyncio.to_thread(requests.get, f"{url_base}{path}", headers=headers, timeout=10)
         return r.json() if r.status_code == 200 else None
     except: return None
 
@@ -217,6 +220,7 @@ async def handle_pronostico(message):
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
     msg_espera = await bot.reply_to(message, "📡 Analizando probabilidades...")
     try:
+        # ROBUSTEZ: Intento cargar de GitHub, si falla usa el archivo local
         try:
             raw_json = requests.get(URL_JSON, timeout=10).json()
         except:
@@ -315,14 +319,22 @@ async def cmd_partidos(message):
     inicio = ahora.strftime('%Y-%m-%d')
     fin = (ahora + timedelta(days=7)).strftime('%Y-%m-%d')
     
-    data = await api_football_call(f"matches?dateFrom={inicio}&dateTo={fin}")
+    # Consulta global de partidos para evitar filtros rígidos del tier gratuito
+    data = await api_football_call(f"dateFrom={inicio}&dateTo={fin}", base_global=True)
     
     if not data or not data.get('matches'):
-        await bot.reply_to(message, "📅 No hay partidos programados para los próximos 7 días.")
+        await bot.reply_to(message, "📅 No hay partidos programados en los próximos 7 días.")
         return
 
-    txt = "📅 **PRÓXIMOS 7 DÍAS (HORA JUÁREZ)**\n\n"
-    for m in data['matches'][:12]:
+    # Filtrar solo partidos de LaLiga (PD)
+    matches_laliga = [m for m in data['matches'] if m['competition']['code'] == 'PD']
+
+    if not matches_laliga:
+        await bot.reply_to(message, "📅 No encontré partidos de LaLiga esta semana.")
+        return
+
+    txt = "📅 **LALIGA: PRÓXIMOS 7 DÍAS**\n\n"
+    for m in matches_laliga[:12]:
         dt = datetime.strptime(m['utcDate'], "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=OFFSET_JUAREZ)
         txt += f"🕒 `{dt.strftime('%d/%m %H:%M')}` | **{m['homeTeam']['shortName']} vs {m['awayTeam']['shortName']}**\n"
     
