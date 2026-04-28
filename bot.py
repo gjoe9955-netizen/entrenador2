@@ -173,13 +173,21 @@ async def obtener_datos_mercado(equipo_l):
     return 1.85, 3.50, 4.00, False
 
 async def api_football_call(params):
-    """Llamada corregida: Apunta al endpoint de competición PD (LaLiga)"""
+    """
+    Corregido: Usa el endpoint directo /competitions/PD/matches (LaLiga)
+    y concatena los parámetros adicionales.
+    """
     headers = {'X-Auth-Token': FOOTBALL_DATA_KEY}
     url = f"https://api.football-data.org/v4/competitions/PD/matches?{params}"
     try:
         r = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
-        return r.json() if r.status_code == 200 else None
-    except: return None
+        if r.status_code == 200:
+            return r.json()
+        logging.error(f"Error API Football: {r.status_code}")
+        return None
+    except Exception as e:
+        logging.error(f"Error conexión API: {e}")
+        return None
 
 async def obtener_h2h_directo(equipo_l, equipo_v):
     URL_CSV = "https://www.football-data.co.uk/mmz4281/2526/SP1.csv"
@@ -291,7 +299,10 @@ async def cmd_historial(message):
 async def cmd_validar(message):
     msg = await bot.reply_to(message, "🔍 Validando resultados...")
     try:
-        historial = requests.get(f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}").json()
+        historial_url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
+        historial = requests.get(historial_url).json()
+        
+        # Validamos usando los terminados recientemente
         data_api = await api_football_call("status=FINISHED")
         actualizados = 0
         if data_api and 'matches' in data_api:
@@ -301,25 +312,32 @@ async def cmd_validar(message):
                         h_api, a_api = m['homeTeam']['shortName'].lower(), m['awayTeam']['shortName'].lower()
                         if h_api in item['partido'].lower() and a_api in item['partido'].lower():
                             res = m['score']['winner']
-                            if item['pick'] == "No Bet": item['status'] = "➖ VOID"
+                            item['marcador_real'] = f"{m['score']['fullTime']['home']}-{m['score']['fullTime']['away']}"
+                            if item['pick'] == "No Bet": 
+                                item['status'] = "➖ VOID"
                             elif (res == 'HOME_TEAM' and h_api in item['pick'].lower()) or (res == 'AWAY_TEAM' and a_api in item['pick'].lower()):
                                 item['status'] = "✅ WIN"
-                            else: item['status'] = "❌ LOSS"
+                            else: 
+                                item['status'] = "❌ LOSS"
                             actualizados += 1
         if actualizados > 0:
             await guardar_en_github(historial_completo=historial)
             await bot.edit_message_text(f"✅ Se validaron {actualizados} picks.", message.chat.id, msg.message_id)
         else: await bot.edit_message_text("ℹ️ Sin picks pendientes terminados.", message.chat.id, msg.message_id)
-    except: await bot.edit_message_text("❌ Error en validación.", message.chat.id, msg.message_id)
+    except Exception as e: 
+        logging.error(f"Error validar: {e}")
+        await bot.edit_message_text("❌ Error en validación.", message.chat.id, msg.message_id)
 
 @bot.message_handler(commands=['partidos'])
 async def cmd_partidos(message):
+    # Uso de timezone.utc para evitar deprecation y asegurar precisión
     ahora_utc = datetime.now(timezone.utc)
     fecha_inicio = ahora_utc.strftime('%Y-%m-%d')
     fecha_fin = (ahora_utc + timedelta(days=7)).strftime('%Y-%m-%d')
     
     msg_espera = await bot.reply_to(message, f"📡 Consultando calendario (del {fecha_inicio} al {fecha_fin})...")
     
+    # Llamada al endpoint PD corregido
     data = await api_football_call(f"dateFrom={fecha_inicio}&dateTo={fecha_fin}")
     
     if not data or not data.get('matches'):
@@ -332,12 +350,14 @@ async def cmd_partidos(message):
     txt = "⚽ **PRÓXIMOS PARTIDOS (LALIGA)**\n"
     txt += f"📅 _Rango: {fecha_inicio} al {fecha_fin}_\n{'—'*20}\n\n"
     
+    # Umbral de tiempo local para filtrar
     limite_actual = datetime.now(timezone.utc) + timedelta(hours=OFFSET_JUAREZ)
     
     encontrados = 0
     for m in data['matches']:
         dt_partido = datetime.strptime(m['utcDate'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) + timedelta(hours=OFFSET_JUAREZ)
         
+        # Solo mostrar si el partido es ahora o en el futuro
         if dt_partido >= limite_actual:
             txt += f"🕒 `{dt_partido.strftime('%d/%m %H:%M')}`\n"
             txt += f"**{m['homeTeam']['shortName']} vs {m['awayTeam']['shortName']}**\n"
