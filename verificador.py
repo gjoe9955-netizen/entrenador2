@@ -6,11 +6,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configuración
+# --- Configuración Corregida ---
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
-API_KEY_FOOTBALL = os.getenv('FOOTBALL_DATA_KEY')
+# Usamos el nombre exacto de tus capturas de GitHub/Railway
+API_KEY_FOOTBALL = os.getenv('FOOTBALL_DATA_API_KEY') 
 REPO_PATH = "gjoe9955-netizen/entrenador2"
-HISTORIAL_FILE = "historial_picks.json"
+# Unificado con el nombre que usa el bot
+HISTORIAL_FILE = "historial.json" 
 
 def obtener_resultados_recientes():
     """Consulta los resultados finalizados de LaLiga"""
@@ -40,40 +42,43 @@ def actualizar_historial():
     headers_gh = {"Authorization": f"token {GITHUB_TOKEN}"}
     
     try:
-        r = requests.get(url_gh, headers=headers_gh)
-        if r.status_code != 200:
-            print("❌ No se pudo acceder al historial en GitHub.")
+        res_get = requests.get(url_gh, headers=headers_gh)
+        if res_get.status_code != 200:
+            print(f"❌ No se pudo obtener el historial de GitHub: {res_get.text}")
             return
-        
-        file_data = r.json()
-        content_b64 = file_data['content'].replace("\n", "")
-        historial = json.loads(base64.b64decode(content_b64).decode('utf-8'))
-        
+            
+        file_data = res_get.json()
+        content = base64.b64decode(file_data['content']).decode('utf-8')
+        historial = json.loads(content)
+
+        # 2. Obtener resultados reales
         resultados_reales = obtener_resultados_recientes()
         if not resultados_reales:
-            print("ℹ️ No se obtuvieron resultados nuevos de la API.")
+            print("⚠️ No se obtuvieron resultados nuevos de la API.")
             return
 
         cambio = False
+        # 3. Cruzar datos
         for pick in historial:
-            # Solo procesamos los que están pendientes
-            if pick.get("resultado_real") == "Pendiente":
+            # Sincronizado con el status del bot (con emoji)
+            if pick.get("status") == "⏳ PENDIENTE":
+                equipo_l, equipo_v = pick["partido"].split(" vs ")
+                
                 for match in resultados_reales:
-                    local_real = match['homeTeam']['name']
-                    visit_real = match['awayTeam']['name']
+                    api_l = match['homeTeam']['name']
+                    api_v = match['awayTeam']['name']
                     
-                    # Verificación por coincidencia de nombres normalizados
-                    if (normalizar_nombre(local_real) in normalizar_nombre(pick['partido']) and 
-                        normalizar_nombre(visit_real) in normalizar_nombre(pick['partido'])):
+                    if normalizar_nombre(equipo_l) == normalizar_nombre(api_l) and \
+                       normalizar_nombre(equipo_v) == normalizar_nombre(api_v):
                         
                         goles_l = match['score']['fullTime']['home']
                         goles_v = match['score']['fullTime']['away']
                         marcador_real = f"{goles_l}-{goles_v}"
                         
-                        pick["resultado_real"] = marcador_real
-                        pick["estado"] = "REVISADO"
+                        pick["marcador_real"] = marcador_real
+                        pick["status"] = "✅ REVISADO" # Mantenemos el estilo de emojis
                         
-                        # Determinar ganador real para futuras estadísticas
+                        # Determinar ganador real
                         if goles_l > goles_v: pick["ganador_real"] = "Local"
                         elif goles_l < goles_v: pick["ganador_real"] = "Visitante"
                         else: pick["ganador_real"] = "Empate"
@@ -83,12 +88,12 @@ def actualizar_historial():
                         break
 
         if cambio:
-            # CORRECCIÓN DE SINTAXIS AQUÍ: ensure_ascii va dentro de dumps()
+            # Serializar correctamente
             json_str = json.dumps(historial, indent=4, ensure_ascii=False)
             new_content = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
             
             payload = {
-                "message": "Auditoría automática de resultados",
+                "message": "Auditoría automática de resultados 🏟️",
                 "content": new_content,
                 "sha": file_data['sha']
             }
