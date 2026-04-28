@@ -7,7 +7,7 @@ import base64
 import io
 import pandas as pd
 from scipy.stats import poisson
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from openai import OpenAI
 import telebot
@@ -173,10 +173,9 @@ async def obtener_datos_mercado(equipo_l):
     return 1.85, 3.50, 4.00, False
 
 async def api_football_call(params):
-    """Llamada optimizada: Usa filtros directos en la URL"""
+    """Llamada corregida: Apunta al endpoint de competición PD (LaLiga)"""
     headers = {'X-Auth-Token': FOOTBALL_DATA_KEY}
-    # Forzamos la búsqueda en LaLiga (ID: 2014) para evitar vacíos
-    url = f"https://api.football-data.org/v4/matches?competitions=2014&{params}"
+    url = f"https://api.football-data.org/v4/competitions/PD/matches?{params}"
     try:
         r = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
         return r.json() if r.status_code == 200 else None
@@ -250,7 +249,7 @@ async def handle_pronostico(message):
         nivel = "DIAMANTE 💎" if edge > 0.05 else "ORO 🥇" if edge > 0.02 else "PLATA 🥈" if edge > 0 else "SIN VALOR ⚠️"
         
         await guardar_en_github(nuevo_registro={
-            "fecha": (datetime.utcnow() + timedelta(hours=OFFSET_JUAREZ)).strftime('%Y-%m-%d %H:%M'),
+            "fecha": (datetime.now(timezone.utc) + timedelta(hours=OFFSET_JUAREZ)).strftime('%Y-%m-%d %H:%M'),
             "partido": f"{m_l} vs {m_v}", "pick": m_l if edge > 0 else "No Bet",
             "poisson": f"{ph*100:.1f}%", "cuota": c_l, "edge": f"{edge*100:.1f}%",
             "stake": f"{stake}%", "nivel": nivel, "status": "⏳ PENDIENTE"
@@ -293,7 +292,6 @@ async def cmd_validar(message):
     msg = await bot.reply_to(message, "🔍 Validando resultados...")
     try:
         historial = requests.get(f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}").json()
-        # Buscamos partidos terminados de LaLiga
         data_api = await api_football_call("status=FINISHED")
         actualizados = 0
         if data_api and 'matches' in data_api:
@@ -316,28 +314,44 @@ async def cmd_validar(message):
 
 @bot.message_handler(commands=['partidos'])
 async def cmd_partidos(message):
-    ahora = datetime.now()
-    inicio = ahora.strftime('%Y-%m-%d')
-    fin = (ahora + timedelta(days=7)).strftime('%Y-%m-%d')
+    ahora_utc = datetime.now(timezone.utc)
+    fecha_inicio = ahora_utc.strftime('%Y-%m-%d')
+    fecha_fin = (ahora_utc + timedelta(days=7)).strftime('%Y-%m-%d')
     
-    # Forzamos la consulta a LaLiga (ID 2014) con el rango de fechas
-    data = await api_football_call(f"dateFrom={inicio}&dateTo={fin}")
+    msg_espera = await bot.reply_to(message, f"📡 Consultando calendario (del {fecha_inicio} al {fecha_fin})...")
+    
+    data = await api_football_call(f"dateFrom={fecha_inicio}&dateTo={fecha_fin}")
     
     if not data or not data.get('matches'):
-        await bot.reply_to(message, f"📅 No hay partidos de LaLiga programados entre el {inicio} y el {fin}.")
+        await bot.edit_message_text(
+            f"📅 No hay partidos programados desde hoy ({fecha_inicio}) para la próxima semana.",
+            message.chat.id, msg_espera.message_id
+        )
         return
 
-    txt = "📅 **LALIGA: PRÓXIMOS 7 DÍAS**\n\n"
-    for m in data['matches'][:15]:
-        # Ajuste horario
-        dt = datetime.strptime(m['utcDate'], "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=OFFSET_JUAREZ)
-        txt += f"🕒 `{dt.strftime('%d/%m %H:%M')}` | **{m['homeTeam']['shortName']} vs {m['awayTeam']['shortName']}**\n"
+    txt = "⚽ **PRÓXIMOS PARTIDOS (LALIGA)**\n"
+    txt += f"📅 _Rango: {fecha_inicio} al {fecha_fin}_\n{'—'*20}\n\n"
     
-    await bot.reply_to(message, txt, parse_mode='Markdown')
+    limite_actual = datetime.now(timezone.utc) + timedelta(hours=OFFSET_JUAREZ)
+    
+    encontrados = 0
+    for m in data['matches']:
+        dt_partido = datetime.strptime(m['utcDate'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) + timedelta(hours=OFFSET_JUAREZ)
+        
+        if dt_partido >= limite_actual:
+            txt += f"🕒 `{dt_partido.strftime('%d/%m %H:%M')}`\n"
+            txt += f"**{m['homeTeam']['shortName']} vs {m['awayTeam']['shortName']}**\n"
+            txt += f"`/pronostico {m['homeTeam']['shortName']} vs {m['awayTeam']['shortName']}`\n"
+            txt += f"{'—'*15}\n"
+            encontrados += 1
+
+    if encontrados == 0:
+        txt = "✅ No quedan más partidos para hoy. Prueba mañana."
+
+    await bot.edit_message_text(txt, message.chat.id, msg_espera.message_id, parse_mode='Markdown')
 
 @bot.message_handler(commands=['tabla'])
 async def cmd_tabla(message):
-    # Endpoint de standings para LaLiga (PD)
     headers = {'X-Auth-Token': FOOTBALL_DATA_KEY}
     url = "https://api.football-data.org/v4/competitions/PD/standings"
     try:
