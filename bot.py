@@ -44,27 +44,27 @@ SISTEMA_IA = {
     ]
 }
 
-# --- Motores de IA (Blindado contra Error de API Key) ---
+# --- Motores de IA (Blindado y Mapeado a Railway) ---
 async def ejecutar_ia(rol, prompt):
     config = SISTEMA_IA[rol]
     if not config["nodo"]: return None
     
-    # Lectura dinámica para evitar el error "apikey client option must be set"
-    s_key = os.getenv('SAMBA_KEY')
-    g_key = os.getenv('GROQ_KEY')
+    # Mapeo flexible según captura de pantalla del usuario
+    s_key = os.getenv('SAMBA_KEY') or os.getenv('SAMBANOVA_API_KEY')
+    g_key = os.getenv('GROQ_API_KEY') or os.getenv('GROQ_KEY')
     
     if config["api"] == 'SAMBA':
-        if not s_key: return "❌ Error: SAMBA_KEY no configurada."
+        if not s_key: return "❌ Error: SAMBA_KEY no configurada en Railway."
         base_url = "https://api.sambanova.ai/v1"
-        key = s_key
+        api_key = s_key
     else:
-        if not g_key: return "❌ Error: GROQ_KEY no configurada."
+        if not g_key: return "❌ Error: GROQ_API_KEY no configurada en Railway."
         base_url = "https://api.groq.com/openai/v1"
-        key = g_key
+        api_key = g_key
 
     try:
-        # Inicialización explícita dentro de la llamada
-        client = OpenAI(api_key=key, base_url=base_url)
+        # Inicialización con la llave correcta detectada
+        client = OpenAI(api_key=api_key, base_url=base_url)
         res = await asyncio.to_thread(
             client.chat.completions.create,
             model=config["nodo"],
@@ -187,7 +187,6 @@ async def handle_pronostico(message):
                 else: pa += prob
 
         edge = ph - (1/c_l)
-        # Kelly (fracción 0.25 para proteger banca)
         kelly = ((c_l * ph) - 1) / (c_l - 1) if edge > 0 else 0
         stake = round(max(0, min(kelly * 0.25 * 100, 5.0)), 2)
         nivel = "DIAMANTE 💎" if edge > 0.05 else "ORO 🥇" if edge > 0.02 else "PLATA 🥈" if edge > 0 else "SIN VALOR ⚠️"
@@ -200,8 +199,6 @@ async def handle_pronostico(message):
         }))
 
         header = f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | ✅ Poisson ({ph*100:.1f}%) | {'✅' if check_h2h else '❌'} H2H\n{'—'*20}\n"
-        
-        # Prompt técnico para la IA
         prompt_e = (f"Analiza: {m_l} vs {m_v}. Poisson: {ph*100:.1f}%. Cuota: {c_l}. "
                     f"H2H: {h2h_str}. Edge: {edge*100:.1f}%. NIVEL: {nivel}. "
                     f"Criterio Kelly sugiere Stake {stake}%. Justifica el valor de la apuesta.")
