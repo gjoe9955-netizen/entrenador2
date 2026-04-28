@@ -1,7 +1,3 @@
-# BOT ANALISTA V5.3 ESTABLE
-# Basado en tu último archivo funcional
-# Mejora integrada: Debate IA + Veredicto Final sin romper comandos
-
 import os
 import json
 import asyncio
@@ -113,6 +109,14 @@ def normalizar(texto):
     return texto.strip()
 
 
+def limpiar_markdown(texto):
+    if not texto:
+        return ""
+    for ch in ["*", "_", "`", "[", "]", "(", ")"]:
+        texto = texto.replace(ch, "")
+    return texto
+
+
 # --------------------------------------------------
 # IA
 # --------------------------------------------------
@@ -154,10 +158,10 @@ async def ejecutar_ia(rol, prompt):
             temperature=0.1
         )
 
-        return res.choices[0].message.content
+        return limpiar_markdown(res.choices[0].message.content)
 
     except Exception as e:
-        return f"❌ Error IA {rol}: {str(e)[:80]}"
+        return f"Error IA {rol}: {str(e)[:80]}"
 
 
 # --------------------------------------------------
@@ -322,23 +326,16 @@ Stake Kelly: {stake}%
         else:
             veredicto = "🔥 VALUE FUERTE"
 
-        texto = f"""
-📊 **{m_l} vs {m_v}**
-
-⚽ Probabilidad Modelo: `{ph*100:.2f}%`
-💰 Cuota Mercado: `{cuota_l}`
-📈 Edge: `{edge*100:.2f}%`
-🏦 Stake: `{stake}%`
-
-🧠 **ESTRATEGA**
-{analisis}
-
-🛡 **AUDITOR**
-{auditoria if auditoria else 'No configurado'}
-
-🏁 **VEREDICTO FINAL**
-{veredicto}
-"""
+        texto = (
+            f"📊 *{m_l} vs {m_v}*\n\n"
+            f"⚽ Probabilidad Modelo: `{ph*100:.2f}%`\n"
+            f"💰 Cuota Mercado: `{cuota_l}`\n"
+            f"📈 Edge: `{edge*100:.2f}%`\n"
+            f"🏦 Stake: `{stake}%`\n\n"
+            f"🧠 *ESTRATEGA*\n{analisis}\n\n"
+            f"🛡 *AUDITOR*\n{auditoria if auditoria else 'No configurado'}\n\n"
+            f"🏁 *VEREDICTO FINAL*\n{veredicto}"
+        )
 
         await bot.edit_message_text(
             texto,
@@ -379,20 +376,18 @@ async def cmd_historial(message):
 @bot.message_handler(commands=["help", "start"])
 async def cmd_help(message):
 
-    txt = """
-🤖 **BOT ANALISTA V5.3 ESTABLE**
-
-📊 /pronostico Local vs Visitante
-💰 /valor Local vs Visitante
-📁 /historial
-⚙️ /config
-❓ /help
-
-Nuevo:
-🧠 Estratega analiza
-🛡 Auditor rebate
-🏁 Veredicto final conjunto
-"""
+    txt = (
+        "🤖 *BOT ANALISTA V5.3 ESTABLE*\n\n"
+        "📊 /pronostico Local vs Visitante\n"
+        "💰 /valor Local vs Visitante\n"
+        "📁 /historial\n"
+        "⚙️ /config\n"
+        "❓ /help\n\n"
+        "Nuevo:\n"
+        "🧠 Estratega analiza\n"
+        "🛡 Auditor rebate\n"
+        "🏁 Veredicto final conjunto"
+    )
 
     await bot.reply_to(message, txt, parse_mode="Markdown")
 
