@@ -34,23 +34,25 @@ FILE_PATH = "historial.json"
 bot = AsyncTeleBot(TOKEN)
 
 # --- Persistencia en GitHub ---
-async def guardar_en_github(nuevo_registro):
+async def guardar_en_github(nuevo_registro=None, historial_completo=None):
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FILE_PATH}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     try:
         r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            data = r.json()
-            sha = data['sha']
-            historial = json.loads(base64.b64decode(data['content']).decode('utf-8'))
-        else:
-            historial, sha = [], None
-
-        historial.append(nuevo_registro)
-        nuevo_contenido = base64.b64encode(json.dumps(historial, indent=4, ensure_ascii=False).encode('utf-8')).decode('utf-8')
+        sha = r.json()['sha'] if r.status_code == 200 else None
         
+        if historial_completo is None:
+            if r.status_code == 200:
+                historial = json.loads(base64.b64decode(r.json()['content']).decode('utf-8'))
+            else:
+                historial = []
+            if nuevo_registro: historial.append(nuevo_registro)
+        else:
+            historial = historial_completo
+
+        nuevo_contenido = base64.b64encode(json.dumps(historial, indent=4, ensure_ascii=False).encode('utf-8')).decode('utf-8')
         payload = {
-            "message": f"🤖 Historial: {nuevo_registro['partido']}",
+            "message": "🤖 Actualización de Historial",
             "content": nuevo_contenido,
             "sha": sha
         }
@@ -199,15 +201,16 @@ async def handle_pronostico(message):
     else: nivel = "RIESGO ALTO / SIN VALOR ⚠️"
 
     # Guardar en GitHub
-    asyncio.create_task(guardar_en_github({
+    asyncio.create_task(guardar_en_github(nuevo_registro={
         "fecha": (datetime.utcnow() + timedelta(hours=OFFSET_JUAREZ)).strftime('%Y-%m-%d %H:%M'),
         "partido": f"{m_l} vs {m_v}",
+        "pick": m_l if edge_real > 0 else "No Bet",
         "poisson": f"{p_percent:.1f}%",
         "cuota": c_l,
         "edge": f"{edge_real*100:.1f}%",
         "stake": f"{stake_final}%",
         "nivel": nivel,
-        "pick": m_l if edge_real > 0 else "No Bet"
+        "status": "⏳ PENDIENTE"
     }))
 
     header = (f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | "
@@ -235,7 +238,7 @@ async def handle_pronostico(message):
 
     await bot.edit_message_text(final, message.chat.id, msg_espera.message_id, parse_mode='Markdown')
 
-# --- Comandos de Información ---
+# --- Gestión de Historial y Validación ---
 @bot.message_handler(commands=['historial'])
 async def cmd_historial(message):
     url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
@@ -244,13 +247,46 @@ async def cmd_historial(message):
         historial = r.json()
         if not historial:
             await bot.reply_to(message, "📭 Historial vacío."); return
-        txt = "📜 **HISTORIAL (GITHUB):**\n\n"
-        for r in historial[-8:]:
-            txt += f"📅 `{r['fecha']}`\n⚽ **{r['partido']}**\n🎯 Pick: `{r['pick']}` | Edge: `{r['edge']}` | Stake: `{r['stake']}`\n{'—'*15}\n"
+        txt = "📜 **HISTORIAL RECIENTE:**\n\n"
+        for r in historial[-10:]:
+            txt += f"📅 `{r['fecha']}`\n⚽ **{r['partido']}**\n🎯 Pick: `{r['pick']}` | {r['status']}\n{'—'*15}\n"
         await bot.reply_to(message, txt, parse_mode='Markdown')
-    except:
-        await bot.reply_to(message, "❌ No se pudo leer el historial de GitHub.")
+    except: await bot.reply_to(message, "❌ Error al leer historial.")
 
+@bot.message_handler(commands=['validar'])
+async def cmd_validar(message):
+    msg_espera = await bot.reply_to(message, "🔍 Buscando resultados finales en la API...")
+    url_h = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
+    
+    try:
+        historial = requests.get(url_h).json()
+        data_api = await api_football_call("matches?status=FINISHED")
+        if not data_api: await bot.edit_message_text("❌ No hay resultados nuevos en la API.", message.chat.id, msg_espera.message_id); return
+
+        count = 0
+        for item in historial:
+            if item.get("status") == "⏳ PENDIENTE":
+                for m in data_api['matches']:
+                    h_api, a_api = m['homeTeam']['shortName'].lower(), m['awayTeam']['shortName'].lower()
+                    if h_api in item['partido'].lower() and a_api in item['partido'].lower():
+                        res = m['score']['winner']
+                        # Lógica de validación
+                        if item['pick'] == "No Bet": item['status'] = "➖ VOID"
+                        elif (res == 'HOME_TEAM' and h_api in item['pick'].lower()) or \
+                             (res == 'AWAY_TEAM' and a_api in item['pick'].lower()):
+                            item['status'] = "✅ WIN"
+                        else:
+                            item['status'] = "❌ LOSS"
+                        count += 1
+
+        if count > 0:
+            await guardar_en_github(historial_completo=historial)
+            await bot.edit_message_text(f"✅ Se validaron {count} partidos nuevos.", message.chat.id, msg_espera.message_id)
+        else:
+            await bot.edit_message_text("ℹ️ No se encontraron cierres para los pendientes.", message.chat.id, msg_espera.message_id)
+    except: await bot.edit_message_text("❌ Fallo en la validación.", message.chat.id, msg_espera.message_id)
+
+# --- Comandos de Información ---
 @bot.message_handler(commands=['partidos'])
 async def cmd_partidos(message):
     data = await api_football_call("matches?status=SCHEDULED")
@@ -277,7 +313,7 @@ async def cmd_equipos(message):
     equipos = ", ".join([f"`{e}`" for e in res[liga]['teams'].keys()])
     await bot.reply_to(message, f"📋 **EQUIPOS JSON:**\n\n{equipos}", parse_mode='Markdown')
 
-# --- Gestión de Nodos ---
+# --- Gestión de Nodos y Configuración ---
 @bot.message_handler(commands=['config'])
 async def cmd_config(message):
     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🧠 ASIGNAR ESTRATEGA", callback_data="set_rol_estratega"))
@@ -317,13 +353,13 @@ async def cb_fin(call):
 @bot.message_handler(commands=['help'])
 async def cmd_help(message):
     help_text = (
-        "🤖 **SISTEMA V4.8 HISTORIC-GIT**\n\n"
+        "🤖 **SISTEMA V4.9 VALIDATE-GIT**\n\n"
         "📈 **ANÁLISIS:**\n"
-        "• `/pronostico Local vs Visitante`: Poisson + Kelly.\n"
-        "• `/historial`: Consulta los últimos registros en GitHub.\n"
+        "• `/pronostico Local vs Visitante`: Análisis + Kelly.\n"
+        "• `/historial`: Ver pronósticos y estados.\n"
+        "• `/validar`: Cierra resultados pendientes desde la API.\n"
         "• `/config`: Nodos Estratega y Auditor.\n\n"
-        "⚽ **INFORMACIÓN:** `/partidos`, `/tabla`, `/equipos`.\n\n"
-        "💾 **PERSISTENCIA:** Repositorio GitHub Activo."
+        "⚽ **INFO:** `/partidos`, `/tabla`, `/equipos`."
     )
     await bot.reply_to(message, help_text, parse_mode='Markdown')
 
