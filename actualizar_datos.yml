@@ -25,7 +25,7 @@ jobs:
 
     - name: Ejecutar script de actualización
       env:
-        API_KEY_FOOTBALL: ${{ secrets.API_KEY_FOOTBALL }}
+        API_KEY_FOOTBALL: ${{ secrets.FOOTBALL_DATA_API_KEY }}
       run: python update_league_data.py
 
     - name: Guardar cambios en GitHub
