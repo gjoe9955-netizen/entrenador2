@@ -20,7 +20,6 @@ logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 TOKEN = os.getenv('TOKEN_TELEGRAM')
-# UNIFICACIÓN: Sincronizado con trainer.py y github actions
 FOOTBALL_DATA_KEY = os.getenv('API_KEY_FOOTBALL')
 ODDS_API_KEY = os.getenv('API_KEY_ODDS')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
@@ -218,7 +217,6 @@ async def handle_pronostico(message):
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
     msg_espera = await bot.reply_to(message, "📡 Analizando probabilidades...")
     try:
-        # ROBUSTEZ: Intento cargar de GitHub, si falla usa el archivo local
         try:
             raw_json = requests.get(URL_JSON, timeout=10).json()
         except:
@@ -313,12 +311,21 @@ async def cmd_validar(message):
 
 @bot.message_handler(commands=['partidos'])
 async def cmd_partidos(message):
-    data = await api_football_call("matches?status=SCHEDULED")
-    if not data: return
-    txt = "📅 **PRÓXIMOS (HORA JUÁREZ)**\n\n"
-    for m in data['matches'][:8]:
+    ahora = datetime.now()
+    inicio = ahora.strftime('%Y-%m-%d')
+    fin = (ahora + timedelta(days=7)).strftime('%Y-%m-%d')
+    
+    data = await api_football_call(f"matches?dateFrom={inicio}&dateTo={fin}")
+    
+    if not data or not data.get('matches'):
+        await bot.reply_to(message, "📅 No hay partidos programados para los próximos 7 días.")
+        return
+
+    txt = "📅 **PRÓXIMOS 7 DÍAS (HORA JUÁREZ)**\n\n"
+    for m in data['matches'][:12]:
         dt = datetime.strptime(m['utcDate'], "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=OFFSET_JUAREZ)
-        txt += f"🕒 `{dt.strftime('%H:%M')}` | **{m['homeTeam']['shortName']} vs {m['awayTeam']['shortName']}**\n"
+        txt += f"🕒 `{dt.strftime('%d/%m %H:%M')}` | **{m['homeTeam']['shortName']} vs {m['awayTeam']['shortName']}**\n"
+    
     await bot.reply_to(message, txt, parse_mode='Markdown')
 
 @bot.message_handler(commands=['tabla'])
