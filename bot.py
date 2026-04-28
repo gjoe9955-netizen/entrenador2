@@ -98,23 +98,23 @@ async def ejecutar_ia(rol, prompt):
 
     instrucciones = {
         "estratega": (
-            "Eres un experto en Value Betting y modelos estadísticos Dixon-Coles. "
-            "Analiza: 1) Probabilidades calculadas vs Cuotas reales. 2) Tendencia H2H. "
+            "Eres un experto en Value Betting y modelos estadísticos. "
+            "Analiza: 1) Probabilidad Poisson vs Cuota Real. 2) Tendencia H2H del CSV. "
             "Tu objetivo es identificar si existe una ventaja matemática real (Edge).\n\n"
-            "INSTRUCCIONES TÉCNICAS:\n"
-            "- Define si el partido tiende a ser Over o Under basado en Lambdas.\n"
-            "- Sugiere un marcador exacto basado en la mayor probabilidad Poisson.\n"
+            "REGLAS:\n"
+            "- Si el Edge es > 2%, busca confirmación en el H2H para el PICK.\n"
             "- Si el Edge es negativo, el PICK debe ser NO APOSTAR.\n\n"
-            "FORMATO OBLIGATORIO (Máx 120 palabras):\n"
+            "FORMATO OBLIGATORIO (Máx 100 palabras):\n"
             "• ANÁLISIS: Justificación técnica breve.\n"
-            "• MARCADOR EXACTO: Tu sugerencia.\n"
-            "• PREDICCIÓN: Pronóstico directo o NO APOSTAR."
+            "• MERCADO RELEVANTE: Cuota analizada y su valor.\n"
+            "• PREDICCIÓN: Pronóstico directo (1X2) o NO APOSTAR."
         ),
         "auditor": (
             "Eres un Auditor de Riesgos Matemáticos. PROHIBIDO SALUDAR.\n\n"
             "Valida: Si el Edge es > 0 y el H2H es favorable, aprueba el Stake. "
-            "Si el Edge es negativo y el estratega sugiere apostar, reporta 'INCONGRUENCIA'.\n\n"
-            "Máximo 50 palabras."
+            "Si el Edge es negativo and el estratega sugiere apostar, reporta 'INCONGRUENCIA MATEMÁTICA'. "
+            "Confirma que el Stake 0% es la única acción lógica ante falta de valor.\n\n"
+            "Máximo 100 palabras."
         )
     }
 
@@ -274,13 +274,21 @@ async def handle_pronostico(message):
             "stake": f"{stake}%", "nivel": nivel, "status": "⏳ PENDIENTE"
         })
         
-        header = f"🛠 REPORTE TÉCNICO: {m_l} vs {m_v}\n{'—'*20}\n"
+        # --- Generación de Reporte y Checks de Herramientas ---
+        status_odds = "✅" if check_odds else "❌"
+        status_h2h = "✅" if check_h2h else "❌"
+        status_poisson = "✅" # Se marca como usado siempre que el cálculo Dixon-Coles finaliza.
+        
+        header = f"🛠 REPORTE TÉCNICO: {m_l} vs {m_v}\n"
+        header += f"{status_odds} Odds | {status_poisson} Poisson | {status_h2h} H2H\n"
+        header += f"{'—'*20}\n"
+
         prompt_e = (
             f"DATOS MATEMÁTICOS:\n"
             f"- Lambdas: L:{mu_l:.2f} | V:{mu_v:.2f}\n"
             f"- Poisson (Dixon-Coles): Gana:{ph*100:.1f}% | Empate:{pd*100:.1f}% | Pierde:{pa*100:.1f}%\n"
             f"- Mercado: Cuota {c_l} | Edge: {edge*100:.1f}%\n"
-            f"- H2H: {h2h_str}\n"
+            f"- Historial H2H: {h2h_str}\n"
         )
         
         analisis = await ejecutar_ia("estratega", prompt_e)
