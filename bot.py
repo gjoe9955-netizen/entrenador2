@@ -1,4 +1,4 @@
-# BOT ANALISTA V5.7.1 - FULL COMMANDS & EQUIPOS
+# BOT ANALISTA V5.7.2 - FIX ERRORS & TOKEN LIMIT
 # IA / xG / Poisson / Kelly / H2H / Gestión de Comandos
 
 import os
@@ -60,10 +60,12 @@ PROMTS_SISTEMA = {
     "estratega": """Eres un Analista Cuántico de Apuestas. 
     PROCESAMIENTO: Usa obligatoriamente los datos etiquetados: [POISSON], [xG], [CUOTA], [EDGE].
     MATEMÁTICAS: Usa LaTeX para fórmulas de probabilidad. Justifica el Stake según Kelly.
-    SALIDA: ANALISIS TÉCNICO | COMPARATIVA xG vs POISSON | DECISIÓN FINAL.""",
+    SALIDA: ANALISIS TÉCNICO | COMPARATIVA xG vs POISSON | DECISIÓN FINAL.
+    RESTRICCIÓN: Responde de forma ultra-concreta. Máximo 1000 caracteres.""",
     
     "auditor": """Eres un Gestor de Riesgos. Busca debilidades. 
-    Compara el H2H con el Edge calculado. Si los datos son inconsistentes, RECHAZA el pick."""
+    Compara el H2H con el Edge calculado. Si los datos son inconsistentes, RECHAZA el pick.
+    RESTRICCIÓN: Máximo 500 caracteres."""
 }
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -97,7 +99,8 @@ async def ejecutar_ia(rol, prompt_data):
             model=cfg["nodo"],
             messages=[{"role": "system", "content": PROMTS_SISTEMA[rol]},
                       {"role": "user", "content": f"DATASET:\n{prompt_data}"}],
-            temperature=0.1)
+            temperature=0.1,
+            max_tokens=400) # Límite de tokens para ahorrar y evitar cortes
         return r.choices[0].message.content
     except Exception as e: return f"Error IA: {str(e)[:50]}"
 
@@ -108,7 +111,7 @@ async def ejecutar_ia(rol, prompt_data):
 @bot.message_handler(commands=["start", "help"])
 async def help_cmd(message):
     txt = (
-        "🤖 *BOT ANALISTA V5.7.1 PRO*\n\n"
+        "🤖 *BOT ANALISTA V5.7.2 PRO*\n\n"
         "📊 `/pronostico Local vs Visitante` - Análisis completo.\n"
         "📋 `/historial` - Ver últimos registros.\n"
         "🏟 `/equipos` - Ver lista de equipos disponibles.\n"
@@ -169,7 +172,11 @@ async def handle_pronostico(message):
            f"🧠 *ESTRATEGA:*\n{estratega}\n\n"
            f"🛡 *AUDITOR:*\n{auditor}")
     
-    await bot.edit_message_text(res, message.chat.id, espera.message_id, parse_mode="Markdown")
+    try:
+        await bot.edit_message_text(res, message.chat.id, espera.message_id, parse_mode="Markdown")
+    except Exception:
+        # Fallback si el Markdown falla por caracteres especiales
+        await bot.edit_message_text(res.replace("*", "").replace("_", ""), message.chat.id, espera.message_id)
 
 @bot.message_handler(commands=["config"])
 async def config_cmd(message):
@@ -218,7 +225,7 @@ async def cb_fin(call):
 # ==================================================
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Bot Analista V5.7.1 iniciado.")
+    logging.info("Bot Analista V5.7.2 iniciado.")
     await bot.polling(non_stop=True)
 
 if __name__ == "__main__":
