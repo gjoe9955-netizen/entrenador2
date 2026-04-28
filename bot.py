@@ -28,7 +28,7 @@ URL_JSON = "https://raw.githubusercontent.com/gjoe9955-netizen/entrenador2/main/
 
 bot = AsyncTeleBot(TOKEN)
 
-# --- Estado Global (NODOS GEMINI CORRECTOS) ---
+# --- Estado Global ---
 SISTEMA_IA = {
     "estratega": {"api": None, "nodo": None},
     "auditor": {"api": None, "nodo": None},
@@ -61,7 +61,7 @@ async def ejecutar_ia(rol, prompt):
             return r.json()['choices'][0]['message']['content']
         except: return "❌ Error en Nodo NVIDIA"
 
-# --- Núcleo Estadístico (APIs Reales) ---
+# --- Núcleo Estadístico (CORREGIDO PARA MAPEOS) ---
 async def obtener_datos_mercado(equipo_l):
     if not ODDS_API_KEY: return 1.85, 3.50, 4.00, False
     try:
@@ -70,7 +70,9 @@ async def obtener_datos_mercado(equipo_l):
         r = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
         if r.status_code == 200:
             for match in r.json():
-                if equipo_l.lower() in match['home_team'].lower():
+                home = match['home_team'].lower()
+                query = equipo_l.lower()
+                if query in home or home in query:
                     odds = match['bookmakers'][0]['markets'][0]['outcomes']
                     ol = next(o['price'] for o in odds if o['name'] == match['home_team'])
                     ov = next(o['price'] for o in odds if o['name'] == match['away_team'])
@@ -91,8 +93,8 @@ async def obtener_h2h_directo(equipo_l, equipo_v):
     try:
         data = await api_football_call("teams")
         teams = data.get('teams', []) if data else []
-        id_l = next((t['id'] for t in teams if equipo_l.lower() in t['shortName'].lower()), None)
-        id_v = next((t['id'] for t in teams if equipo_v.lower() in t['shortName'].lower()), None)
+        id_l = next((t['id'] for t in teams if equipo_l.lower() in t['shortName'].lower() or t['shortName'].lower() in equipo_l.lower()), None)
+        id_v = next((t['id'] for t in teams if equipo_v.lower() in t['shortName'].lower() or t['shortName'].lower() in equipo_v.lower()), None)
         
         if id_l and id_v:
             url = f"https://api.football-data.org/v4/teams/{id_l}/matches?competitors={id_v}&status=FINISHED"
@@ -132,8 +134,8 @@ async def handle_pronostico(message):
 
     # 2. Poisson
     liga = next(iter(full_data))
-    m_l = next((t for t in full_data[liga]['teams'] if t.lower() in l_q.lower()), None)
-    m_v = next((t for t in full_data[liga]['teams'] if t.lower() in v_q.lower()), None)
+    m_l = next((t for t in full_data[liga]['teams'] if t.lower() in l_q.lower() or l_q.lower() in t.lower()), None)
+    m_v = next((t for t in full_data[liga]['teams'] if t.lower() in v_q.lower() or v_q.lower() in t.lower()), None)
     
     if not m_l or not m_v:
         await bot.edit_message_text("❌ Equipo no encontrado en el JSON.", message.chat.id, msg_espera.message_id); return
@@ -154,7 +156,7 @@ async def handle_pronostico(message):
     p_local = ph * 100
     edge = p_local - (100 / c_l)
 
-    # 3. Reporte con Checks de API
+    # 3. Reporte
     header = (f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | "
               f"{'✅' if check_json else '❌'} Poisson ({p_local:.1f}%) | "
               f"{'✅' if check_h2h else '❌'} H2H\n"
@@ -176,7 +178,7 @@ async def handle_pronostico(message):
 
     await bot.edit_message_text(final, message.chat.id, msg_espera.message_id, parse_mode='Markdown')
 
-# --- Comandos de Información ---
+# --- Comandos Adicionales ---
 @bot.message_handler(commands=['partidos'])
 async def cmd_partidos(message):
     data = await api_football_call("matches?status=SCHEDULED")
@@ -251,7 +253,7 @@ async def cmd_help(message):
         "• `/partidos`: Próximos juegos ajustados a **Hora Cd. Juárez**.\n"
         "• `/tabla`: Posiciones de La Liga.\n"
         "• `/equipos`: Lista de nombres exactos para el modelo Poisson.\n\n"
-        "⚙️ **ESTADO:** El reporte muestra ✅ si la API respondió correctamente o ❌ si usó datos de respaldo."
+        "⚙️ **ESTADO:** El reporte muestra ✅ si la API respondió correctamente."
     )
     await bot.reply_to(message, help_text, parse_mode='Markdown')
 
