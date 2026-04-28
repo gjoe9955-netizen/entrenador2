@@ -5,6 +5,7 @@ import logging
 import requests
 import base64
 import io
+import unicodedata
 import pandas as pd
 from scipy.stats import poisson
 from datetime import datetime, timedelta, timezone
@@ -59,6 +60,15 @@ SISTEMA_IA = {
         "meta-llama/llama-4-scout-17b-16e-instruct", "llama-3.1-8b-instant", "groq/compound"
     ]
 }
+
+# --- Utilidades ---
+def normalizar(texto):
+    """Elimina acentos y convierte a minúsculas para comparaciones precisas."""
+    texto = texto.lower()
+    texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    for word in ["fc", "rcd", "sd", "cf", "real", "club", "de", "the"]:
+        texto = texto.replace(f" {word} ", " ").replace(f"{word} ", "").replace(f" {word}", "")
+    return texto.strip()
 
 # --- Motores de IA ---
 async def ejecutar_ia(rol, prompt):
@@ -117,7 +127,6 @@ async def guardar_en_github(nuevo_registro=None, historial_completo=None):
 # --- APIs de Datos ---
 async def obtener_datos_mercado(equipo_l):
     if not ODDS_API_KEY: 
-        logging.warning("⚠️ Sin API KEY para cuotas.")
         return 1.85, 3.50, 4.00, False
     try:
         url = "https://api.the-odds-api.com/v4/sports/soccer_spain_la_liga/odds/"
@@ -126,25 +135,27 @@ async def obtener_datos_mercado(equipo_l):
         
         if r.status_code == 200:
             data = r.json()
-            # Limpieza para match flexible (ej: "Real Madrid CF" -> "real madrid")
-            search_name = equipo_l.lower().replace("cf", "").replace("rcd", "").replace("sd", "").strip()
+            search_l = normalizar(equipo_l)
             
             for match in data:
-                home_api = match['home_team'].lower()
-                # Validación bidireccional
-                if search_name in home_api or home_api in search_name:
+                home_api = normalizar(match['home_team'])
+                away_api = normalizar(match['away_team'])
+                
+                # Coincidencia por aproximación normalizada
+                if search_l in home_api or home_api in search_l:
                     for bookmaker in match['bookmakers']:
-                        odds_list = bookmaker['markets'][0]['outcomes']
+                        markets = bookmaker.get('markets')
+                        if not markets: continue
+                        odds_list = markets[0]['outcomes']
                         try:
                             ol = next(o['price'] for o in odds_list if o['name'] == match['home_team'])
                             ov = next(o['price'] for o in odds_list if o['name'] == match['away_team'])
                             oe = next(o['price'] for o in odds_list if o['name'] in ['Draw', 'Tie'])
-                            logging.info(f"✅ Cuotas obtenidas para {equipo_l}")
                             return ol, oe, ov, True
                         except StopIteration: continue
-            logging.warning(f"❓ No se hallaron cuotas para {equipo_l}")
+            logging.warning(f"No se hallaron cuotas para {equipo_l} (Normalizado: {search_l})")
     except Exception as e:
-        logging.error(f"❌ Error Odds API: {e}")
+        logging.error(f"Error Odds API: {e}")
     return 1.85, 3.50, 4.00, False
 
 async def obtener_h2h_directo(equipo_l, equipo_v):
@@ -197,7 +208,6 @@ async def handle_pronostico(message):
         if not m_l or not m_v:
             await bot.edit_message_text("❌ Equipos no encontrados.", message.chat.id, msg_espera.message_id); return
         
-        # INTEGRACIÓN: Búsqueda de cuotas mejorada
         c_l, c_e, c_v, check_odds = await obtener_datos_mercado(m_l)
         h2h_str, check_h2h = await obtener_h2h_directo(m_l, m_v)
         
@@ -231,7 +241,6 @@ async def handle_pronostico(message):
     except Exception as e:
         await bot.edit_message_text(f"❌ Error: {e}", message.chat.id, msg_espera.message_id)
 
-# --- Handlers de Comando y Configuración ---
 @bot.message_handler(commands=['historial'])
 async def cmd_historial(message):
     try:
