@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 TOKEN = os.getenv('TOKEN_TELEGRAM')
-# CORRECCIÓN: Nombre unificado según tus variables de Railway
+# UNIFICACIÓN: Sincronizado con trainer.py y github actions
 FOOTBALL_DATA_KEY = os.getenv('FOOTBALL_DATA_API_KEY') 
 ODDS_API_KEY = os.getenv('ODDS_API_KEY')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
@@ -218,7 +218,13 @@ async def handle_pronostico(message):
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
     msg_espera = await bot.reply_to(message, "📡 Analizando probabilidades...")
     try:
-        raw_json = requests.get(URL_JSON).json()
+        # ROBUSTEZ: Intento cargar de GitHub, si falla usa el archivo local
+        try:
+            raw_json = requests.get(URL_JSON, timeout=10).json()
+        except:
+            with open('modelo_poisson.json', 'r', encoding='utf-8') as f:
+                raw_json = json.load(f)
+
         liga = next(iter(raw_json))
         m_l = next((t for t in raw_json[liga]['teams'] if t.lower() in l_q.lower() or l_q.lower() in t.lower()), None)
         m_v = next((t for t in raw_json[liga]['teams'] if t.lower() in v_q.lower() or v_q.lower() in t.lower()), None)
@@ -270,7 +276,6 @@ async def cmd_historial(message):
         txt = "📊 **RESUMEN DE OPERACIONES**\n"
         txt += f"{'—'*20}\n\n"
         for i in r[-7:]:
-            # Sincronización con verificador: busca etiquetas completas
             status_val = i.get('status', '⏳ PENDIENTE')
             icon = "✅" if "WIN" in status_val or "REVISADO" in status_val else "❌" if "LOSS" in status_val else "➖" if "VOID" in status_val else "⏳"
             txt += f"{icon} **{i['partido']}**\n"
@@ -382,7 +387,6 @@ async def cmd_help(message):
 async def main():
     logging.info("Iniciando Bot...")
     try:
-        # Resolvemos el Error 409: Limpia webhooks y actualizaciones antiguas
         await bot.delete_webhook(drop_pending_updates=True)
         logging.info("Conexiones previas limpiadas. Iniciando Polling...")
         await bot.polling(non_stop=True, timeout=60)
