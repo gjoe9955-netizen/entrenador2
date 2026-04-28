@@ -139,22 +139,22 @@ async def obtener_h2h_directo(equipo_l, equipo_v):
                     if w == 'HOME_TEAM': l += 1
                     elif w == 'AWAY_TEAM': v += 1
                     else: e += 1
-                return f"L{l}|V{v}|E{e}", True
-        return "Sin rastro.", False
-    except: return "Error archivos.", False
+                return f"H2H: L{l}|V{v}|E{e}", True
+        return "H2H: Sin rastro.", False
+    except: return "H2H: Archivos perdidos.", False
 
 # --- Comando Principal: Pronóstico ---
 @bot.message_handler(commands=['pronostico', 'valor'])
 async def handle_pronostico(message):
     if not SISTEMA_IA["estratega"]["nodo"]:
-        await bot.reply_to(message, "🕶️ *\"Primero dime quién es el contacto...\"*\nUsa `/config`."); return
+        await bot.reply_to(message, "🕶️ *\"Primero dime quién es el contacto...\"*\nUsa `/config` para asignar nodos."); return
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2 or " vs " not in parts[1]:
         await bot.reply_to(message, "🚬 *\"¿Qué partido? Suelta la sopa...\"*\nUsa: `/pronostico Local vs Visitante`."); return
 
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
-    msg_espera = await bot.reply_to(message, "📞 `Llamando al contacto... Rebuscando en los libros...`")
+    msg_espera = await bot.reply_to(message, "📞 `Llamando al contacto... Rebuscando en los archivos...`")
 
     raw_json = requests.get(URL_JSON)
     full_data = raw_json.json()
@@ -219,17 +219,17 @@ async def handle_pronostico(message):
               f"`==============================`\n")
     
     prompt_e = (
-        f"Actúa como un Corredor de Apuestas Noir de los 50. Partido: {m_l} vs {m_v}.\n"
-        f"Poisson {p_percent:.1f}%, Cuota {c_l}, H2H {h2h}.\n"
-        f"NIVEL {nivel}, STAKE {stake_final}%.\n"
-        f"Veredicto seco y rudo. Formato: NIVEL, STAKE, EL SOPLO (4 líneas), PICK, CUOTA, EDGE."
+        f"Actúa como un Corredor de Apuestas Noir. Partido: {m_l} vs {m_v}.\n"
+        f"Datos: Poisson {p_percent:.1f}%, Cuota {c_l}, H2H {h2h}.\n"
+        f"NIVEL: {nivel}, STAKE: {stake_final}%.\n"
+        f"Da tu veredicto seco y rudo. Formato: NIVEL, STAKE, EL SOPLO (4 líneas), PICK, CUOTA, EDGE."
     )
     
     analisis = await ejecutar_ia("estratega", prompt_e)
     footer = f"\n\n`------------------------------`\n🕶️ **EL CONTACTO:** `{SISTEMA_IA['estratega']['nodo']}`"
 
     if SISTEMA_IA["auditor"]["nodo"]:
-        prompt_a = f"Actúa como un Auditor de Mafia. Valida este soplo: '{analisis}'. Poisson: {p_percent:.1f}%. Solo di si el trato es seguro o no."
+        prompt_a = f"Actúa como un Auditor de Mafia. Valida este soplo: '{analisis}'. Poisson: {p_percent:.1f}%. Solo di si el dinero está a salvo o no."
         auditoria = await ejecutar_ia("auditor", prompt_a)
         footer += f"\n🕵️‍♂️ **EL MATÓN:** `{SISTEMA_IA['auditor']['nodo']}`"
         final = f"{header}{analisis}\n\n`VEREDICTO:` {auditoria}{footer}"
@@ -251,7 +251,7 @@ async def cmd_historial(message):
         for r in historial[-8:]:
             txt += f"`{r['fecha']}` | **{r['partido']}**\n`SOPLO:` {r['pick']} | {r['status']}\n"
         await bot.reply_to(message, txt, parse_mode='Markdown')
-    except: await bot.reply_to(message, "❌ *\"Alguien quemó los archivos...\"*", parse_mode='Markdown')
+    except: await bot.reply_to(message, "❌ *\"Alguien quemó los archivos... no puedo leer el historial.\"*", parse_mode='Markdown')
 
 @bot.message_handler(commands=['validar'])
 async def cmd_validar(message):
@@ -295,6 +295,20 @@ async def cmd_partidos(message):
         txt += f"🕒 `{dt.strftime('%H:%M')}` | **{m['homeTeam']['shortName']}** vs **{m['awayTeam']['shortName']}**\n"
     await bot.reply_to(message, txt, parse_mode='Markdown')
 
+@bot.message_handler(commands=['help'])
+async def cmd_help(message):
+    help_text = (
+        "🕶️ **THE BOOKIE - SISTEMA V5.0**\n\n"
+        "💼 **OPERACIONES:**\n"
+        "• `/pronostico Local vs Visitante`: Pide un soplo.\n"
+        "• `/historial`: Mira los libros de contabilidad.\n"
+        "• `/validar`: Cobra las deudas pendientes.\n"
+        "• `/config`: Asigna a tus informantes.\n\n"
+        "⚽ **LA CALLE:** `/partidos`, `/tabla`, `/equipos`."
+    )
+    await bot.reply_to(message, help_text, parse_mode='Markdown')
+
+# (Se mantienen los comandos /tabla, /equipos y gestión de nodos sin cambios funcionales)
 @bot.message_handler(commands=['tabla'])
 async def cmd_tabla(message):
     data = await api_football_call("standings")
@@ -311,7 +325,6 @@ async def cmd_equipos(message):
     equipos = ", ".join([f"`{e}`" for e in res[liga]['teams'].keys()])
     await bot.reply_to(message, f"📋 **EQUIPOS EN ARCHIVO:**\n\n{equipos}", parse_mode='Markdown')
 
-# --- Gestión de Nodos y Configuración ---
 @bot.message_handler(commands=['config'])
 async def cmd_config(message):
     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🧠 ASIGNAR EL CONTACTO", callback_data="set_rol_estratega"))
@@ -347,19 +360,6 @@ async def cb_save(call):
 @bot.callback_query_handler(func=lambda call: call.data == "config_fin")
 async def cb_fin(call):
     await bot.edit_message_text("🚀 **SISTEMA OPERATIVO**", call.message.chat.id, call.message.message_id)
-
-@bot.message_handler(commands=['help'])
-async def cmd_help(message):
-    help_text = (
-        "🕶️ **THE BOOKIE - SISTEMA V5.0**\n\n"
-        "💼 **OPERACIONES:**\n"
-        "• `/pronostico Local vs Visitante`: Pide un soplo.\n"
-        "• `/historial`: Mira los libros de contabilidad.\n"
-        "• `/validar`: Cobra las deudas pendientes.\n"
-        "• `/config`: Asigna a tus informantes.\n\n"
-        "⚽ **LA CALLE:** `/partidos`, `/tabla`, `/equipos`."
-    )
-    await bot.reply_to(message, help_text, parse_mode='Markdown')
 
 async def main(): await bot.polling(non_stop=True)
 if __name__ == "__main__": asyncio.run(main())
