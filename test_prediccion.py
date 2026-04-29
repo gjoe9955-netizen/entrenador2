@@ -31,12 +31,16 @@ def test_motor(local, visitante):
         return
 
     # 3. Calcular Lambdas (Goles esperados)
+    # Nota: El id_api se ignora automáticamente aquí al llamar solo a las llaves estadísticas
     lh = s_l['att_h'] * s_v['def_a'] * avg['league_home']
     la = s_v['att_a'] * s_l['def_h'] * avg['league_away']
     
     print(f"\n📊 --- TEST DE PREDICCIÓN: {local} vs {visitante} ---")
     print(f"⚽ Expectativa Local (Lambda H): {lh:.2f}")
     print(f"⚽ Expectativa Visita (Lambda A): {la:.2f}")
+    # Opcional: Mostrar el ID detectado para verificar que el JSON es el nuevo
+    if "id_api" in s_l:
+        print(f"🆔 IDs API: Local({s_l['id_api']}) vs Visita({s_v['id_api']})")
     print("-" * 45)
 
     # 4. Calcular Probabilidades 1X2 con matriz 7x7
@@ -45,7 +49,6 @@ def test_motor(local, visitante):
     
     for x in range(7):
         for y in range(7):
-            # Aplicamos Poisson + Dixon-Coles
             p = (poisson.pmf(x, lh) * poisson.pmf(y, la)) * ajuste_dixon_coles(x, y, lh, la)
             
             if x > y: ph += p
@@ -73,6 +76,5 @@ def test_motor(local, visitante):
         print(f"   {i+1}. {scores[i][0]} ({scores[i][1]:.2%})")
 
 if __name__ == "__main__":
-    # Puedes cambiar los nombres aquí para probar cualquier partido
-    # Asegúrate de usar los nombres exactos que vienen de football-data.org
+    # Asegúrate de usar los nombres exactos que genera tu nuevo trainer.py
     test_motor("Real Madrid CF", "FC Barcelona")
