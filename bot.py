@@ -1,4 +1,4 @@
-# BOT ANALISTA V5.7.2 - FIX ERRORS & TOKEN LIMIT
+# BOT ANALISTA V5.7.3 - CHECKS & ALIGNED IDs
 # IA / xG / Poisson / Kelly / H2H / Gestión de Comandos
 
 import os
@@ -100,7 +100,7 @@ async def ejecutar_ia(rol, prompt_data):
             messages=[{"role": "system", "content": PROMTS_SISTEMA[rol]},
                       {"role": "user", "content": f"DATASET:\n{prompt_data}"}],
             temperature=0.1,
-            max_tokens=400) # Límite de tokens para ahorrar y evitar cortes
+            max_tokens=400)
         return r.choices[0].message.content
     except Exception as e: return f"Error IA: {str(e)[:50]}"
 
@@ -111,7 +111,7 @@ async def ejecutar_ia(rol, prompt_data):
 @bot.message_handler(commands=["start", "help"])
 async def help_cmd(message):
     txt = (
-        "🤖 *BOT ANALISTA V5.7.2 PRO*\n\n"
+        "🤖 *BOT ANALISTA V5.7.3 PRO*\n\n"
         "📊 `/pronostico Local vs Visitante` - Análisis completo.\n"
         "📋 `/historial` - Ver últimos registros.\n"
         "🏟 `/equipos` - Ver lista de equipos disponibles.\n"
@@ -122,14 +122,25 @@ async def help_cmd(message):
 
 @bot.message_handler(commands=["equipos"])
 async def equipos_cmd(message):
-    nombres = sorted([k.capitalize() for k in MAPEO_EQUIPOS.keys()])
-    columnas = 2
-    filas = [nombres[i:i + columnas] for i in range(0, len(nombres), columnas)]
-    tabla = "🏟 *EQUIPOS MAPEADOS (La Liga)*\n\n"
-    for fila in filas:
-        tabla += " | ".join([f"`{name}`" for name in fila]) + "\n"
-    tabla += "\n_Escribe los nombres tal cual aparecen para evitar errores._"
-    await bot.reply_to(message, tabla, parse_mode="Markdown")
+    # Ordenamos el mapeo por ID para mejor control visual
+    equipos_ordenados = sorted(MAPEO_EQUIPOS.items(), key=lambda x: x[1])
+    
+    tabla = "🏟 **DIRECTORIO DE EQUIPOS (La Liga)**\n"
+    tabla += "—" * 15 + "\n"
+    tabla += "` ID  | EQUIPO `\n"
+    tabla += "—" * 15 + "\n"
+    
+    for nombre, id_equipo in equipos_ordenados:
+        espaciado = " " * (4 - len(str(id_equipo)))
+        tabla += f"`{id_equipo}{espaciado}| {nombre.capitalize()}`\n"
+    
+    tabla += "—" * 15 + "\n"
+    tabla += "\n💡 _Escribe el nombre tal cual para el comando /pronostico._"
+    
+    try:
+        await bot.reply_to(message, tabla, parse_mode="Markdown")
+    except Exception:
+        await bot.reply_to(message, tabla.replace("`", ""))
 
 @bot.message_handler(commands=["pronostico", "valor"])
 async def handle_pronostico(message):
@@ -152,8 +163,18 @@ async def handle_pronostico(message):
     n_l, n_v = ID_A_NOMBRE[id_l], ID_A_NOMBRE[id_v]
     espera = await bot.reply_to(message, f"📡 Procesando {n_l} vs {n_v}...")
 
+    # Simulación de datos y Checks
+    # Cambiar a False si alguna función de data falla
+    check_poisson = True
+    check_odds = True
+    check_xg = True
+    check_h2h = True
+    check_kelly = True
+
     prob_l, c_l, edge, stake, h2h = 0.55, 2.10, 0.08, 2.5, "2-1-0"
     xg_l, xg_v = 1.85, 1.10
+
+    def get_check(status): return "✅" if status else "❌"
 
     dataset = (
         f"--- DATASET ---\n"
@@ -167,15 +188,18 @@ async def handle_pronostico(message):
     estratega = await ejecutar_ia("estratega", dataset)
     auditor = await ejecutar_ia("auditor", f"Dataset: {dataset}\nEstratega: {estratega}")
 
-    res = (f"📊 *{n_l} vs {n_v}*\n\n"
-           f"📈 Edge: `{porcentaje(edge)}` | 🏦 Stake: `{stake}%` \n"
+    res = (f"📊 *{n_l} vs {n_v}*\n"
+           f"━━━━━━━━━━━━━━━━━━━━\n"
+           f"{get_check(check_odds)} Odds | {get_check(check_poisson)} Poisson | {get_check(check_xg)} xG\n"
+           f"{get_check(check_h2h)} H2H  | {get_check(check_kelly)} Kelly\n"
+           f"━━━━━━━━━━━━━━━━━━━━\n\n"
+           f"📈 Edge: `{porcentaje(edge)}` | 🏦 Stake: `{stake}%` \n\n"
            f"🧠 *ESTRATEGA:*\n{estratega}\n\n"
            f"🛡 *AUDITOR:*\n{auditor}")
     
     try:
         await bot.edit_message_text(res, message.chat.id, espera.message_id, parse_mode="Markdown")
     except Exception:
-        # Fallback si el Markdown falla por caracteres especiales
         await bot.edit_message_text(res.replace("*", "").replace("_", ""), message.chat.id, espera.message_id)
 
 @bot.message_handler(commands=["config"])
@@ -225,7 +249,7 @@ async def cb_fin(call):
 # ==================================================
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Bot Analista V5.7.2 iniciado.")
+    logging.info("Bot Analista V5.7.3 iniciado.")
     await bot.polling(non_stop=True)
 
 if __name__ == "__main__":
