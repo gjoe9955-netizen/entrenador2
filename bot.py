@@ -201,19 +201,19 @@ async def handle_pronostico(message):
     prob_implied = 1 / c_l
     edge_real = p_win - prob_implied
     
+    # Cálculo previo de Kelly para referencia en el log, aunque la IA sugerirá el suyo
     if edge_real > 0:
         kelly = ((c_l * p_win) - 1) / (c_l - 1)
-        stake_final = round(kelly * 0.25 * 100, 2)
-        stake_final = max(0, min(stake_final, 5)) 
+        stake_referencia = round(kelly * 0.25 * 100, 2)
+        stake_referencia = max(0, min(stake_referencia, 5)) 
     else:
-        stake_final = 0
+        stake_referencia = 0
 
     if edge_real > 0.05: nivel = "DIAMANTE 💎"
     elif edge_real > 0.02: nivel = "ORO 🥇"
     elif edge_real > 0: nivel = "PLATA 🥈"
     else: nivel = "RIESGO ALTO / SIN VALOR ⚠️"
 
-    # Corregido: datetime.now(timezone.utc)
     fecha_hoy = (datetime.now(timezone.utc) + timedelta(hours=OFFSET_JUAREZ)).strftime('%Y-%m-%d %H:%M')
     
     asyncio.create_task(guardar_en_github(nuevo_registro={
@@ -223,7 +223,7 @@ async def handle_pronostico(message):
         "poisson": f"{p_percent:.1f}%",
         "cuota": c_l,
         "edge": f"{edge_real*100:.1f}%",
-        "stake": f"{stake_final}%",
+        "stake": f"{stake_referencia}%",
         "nivel": nivel,
         "status": "⏳ PENDIENTE"
     }))
@@ -233,15 +233,26 @@ async def handle_pronostico(message):
               f"{'✅' if check_h2h else '❌'} H2H\n"
               f"————————————————————\n")
     
+    # PROMPT ACTUALIZADO CON CRITERIO DE KELLY
     prompt_e = (
         f"ERES UN ANALISTA DE ÉLITE. Evalúa: {m_l} vs {m_v}.\n"
-        f"VARIABLES:\n- Poisson: {p_percent:.1f}%\n- Cuota Mercado: {c_l}\n- H2H API: {h2h}\n\n"
-        f"FORMATO:\n🎯 PICK: {m_l if edge_real > 0 else 'No Bet'}\n📈 NIVEL: {nivel}\n💰 STAKE: {stake_final}%\n"
-        f"🔬 MÉTRICAS: P_Final [%], Cuota Justa, Edge [%]\n📝 ANÁLISIS: Breve."
+        f"DATOS CLAVE:\n"
+        f"- Probabilidad Poisson: {p_percent:.1f}%\n"
+        f"- Cuota Mercado: {c_l}\n"
+        f"- Edge (Ventaja): {edge_real*100:.21f}%\n"
+        f"- H2H Histórico: {h2h}\n\n"
+        f"TAREA:\n"
+        f"1. Aplica el CRITERIO DE KELLY (Fraccional 25%) basado en el Edge y la Cuota.\n"
+        f"2. Sugiere un STAKE sugerido (Máximo 5%). Si el Edge es negativo, indica Stake 0% / No Bet.\n\n"
+        f"FORMATO DE RESPUESTA:\n"
+        f"🎯 PICK: [Nombre del equipo o No Bet]\n"
+        f"📈 NIVEL: {nivel}\n"
+        f"💰 STAKE SUGERIDO (KELLY): [X]%\n"
+        f"🔬 MÉTRICAS: Prob: {p_percent:.1f}% | Cuota: {c_l} | Edge: {edge_real*100:.1f}%\n"
+        f"📝 ANÁLISIS: Breve y técnico."
     )
     
     analisis_raw = await ejecutar_ia("estratega", prompt_e)
-    # Escapamos el texto de la IA para evitar errores de HTML
     analisis = html.escape(analisis_raw)
     
     footer = f"\n\n{'—'*20}\n🛰 <b>ESTRATEGA:</b> <code>{SISTEMA_IA['estratega']['api']}</code> ({SISTEMA_IA['estratega']['nodo']})"
@@ -255,7 +266,6 @@ async def handle_pronostico(message):
     else:
         final = f"{header}{analisis}{footer}"
 
-    # Cambiado a parse_mode='HTML' para mayor estabilidad con texto de IA
     await bot.edit_message_text(final, message.chat.id, msg_espera.message_id, parse_mode='HTML')
 
 # --- Gestión de Historial y Validación ---
