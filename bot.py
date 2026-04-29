@@ -186,7 +186,7 @@ async def obtener_h2h_directo(id_l, id_v):
     except: 
         return "H2H: Error API.", False, 0, 0
 
-# --- Comando Principal: Pronóstico con Lógica V2 ---
+# --- Comando Principal: Pronóstico Suavizado V2 ---
 @bot.message_handler(commands=['pronostico', 'valor'])
 async def handle_pronostico(message):
     if not SISTEMA_IA["estratega"]["nodo"]:
@@ -197,7 +197,7 @@ async def handle_pronostico(message):
         await bot.reply_to(message, "⚠️ `/pronostico Local vs Visitante`."); return
 
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
-    msg_espera = await bot.reply_to(message, "📡 Ejecutando Análisis Profesional Conservador...")
+    msg_espera = await bot.reply_to(message, "📡 Ejecutando Análisis Suavizado...")
 
     try:
         raw_json = requests.get(URL_JSON)
@@ -221,7 +221,7 @@ async def handle_pronostico(message):
     l_s, v_s = full_data[liga]['teams'][m_l], full_data[liga]['teams'][m_v]
     h2h, check_h2h, home_wins, away_wins = await obtener_h2h_directo(l_s.get("id_api"), v_s.get("id_api"))
 
-    # --- REGLA 1: Poisson + Mercado ---
+    # --- REGLA 1: Poisson + Mercado (Suavizado 90/10) ---
     avg = full_data[liga]['averages']
     lh = l_s['att_h'] * v_s['def_a'] * avg['league_home']
     la = v_s['att_a'] * l_s['def_h'] * avg['league_away']
@@ -232,34 +232,29 @@ async def handle_pronostico(message):
             if x > y: prob_poisson += poisson.pmf(x, lh) * poisson.pmf(y, la)
 
     prob_market = 1 / c_l
-    p_win = (prob_poisson * 0.82) + (prob_market * 0.18)
+    p_win = (prob_poisson * 0.90) + (prob_market * 0.10)
     p_percent = p_win * 100
 
-    # --- REGLA 2: Edge Ajustado y Margen de Error ---
+    # --- REGLA 2: Edge y Margen de Error Suavizado ---
     edge_real = p_win - prob_market
-    margen_error = 0.02
+    margen_error = 0.01  # Bajamos de 0.02 a 0.01 para liberar picks
     edge_ajustado = edge_real - margen_error
 
-    # --- REGLA 3: Filtro Cuotas Trampa ---
-    if 1.90 <= c_l <= 2.20 and edge_ajustado < 0.04:
+    # --- REGLA 3: Filtro Cuotas Trampa Flexibilizado ---
+    if 1.90 <= c_l <= 2.20 and edge_ajustado < 0.02:
         edge_ajustado = -0.001
 
-    # --- REGLA 4: Penalización H2H Leve ---
-    if "Visitante" in h2h and edge_ajustado < 0.05:
-        if away_wins > home_wins:
-            edge_ajustado -= 0.01
-
-    # --- REGLA 5 y 6: Niveles y Stake Fijo Conservador ---
+    # --- REGLA 5 y 6: Niveles Actualizados ---
     if edge_ajustado <= 0:
         nivel, stake, pick_final = "NO BET 🚫", 0, "No Bet"
     elif edge_ajustado < 0.04:
-        nivel, stake, pick_final = "BRONCE 🥉", 0.35, m_l
+        nivel, stake, pick_final = "BRONCE 🥉", 0.50, m_l
     elif edge_ajustado < 0.07:
-        nivel, stake, pick_final = "PLATA 🥈", 0.70, m_l
+        nivel, stake, pick_final = "PLATA 🥈", 1.00, m_l
     elif edge_ajustado < 0.10:
-        nivel, stake, pick_final = "ORO 🥇", 1.20, m_l
+        nivel, stake, pick_final = "ORO 🥇", 1.50, m_l
     else:
-        nivel, stake, pick_final = "DIAMANTE 💎", 2.00, m_l
+        nivel, stake, pick_final = "DIAMANTE 💎", 2.50, m_l
 
     # --- REGLA 8: Guardado en Historial ---
     fecha_hoy = (datetime.now(timezone.utc) + timedelta(hours=OFFSET_JUAREZ)).strftime('%Y-%m-%d %H:%M')
@@ -277,31 +272,22 @@ async def handle_pronostico(message):
         })
     asyncio.create_task(task_github())
 
-    # --- REGLA 9: Prompt IA Estratega Conservador ---
+    # --- REGLA 9: Prompt IA ---
     header = (f"<b>🛠 REPORTE:</b> {'✅' if check_odds else '❌'} Mercado | "
               f"{'✅' if check_json else '❌'} Poisson ({p_percent:.1f}%) | "
               f"{'✅' if check_h2h else '❌'} H2H\n"
               f"————————————————————\n")
     
     prompt_e = f"""
-Eres analista profesional conservador.
-Partido: {m_l} vs {m_v}
-Datos:
-- Probabilidad ajustada: {p_percent:.1f}%
-- Cuota: {c_l}
-- Edge ajustado: {edge_ajustado*100:.2f}%
-- H2H: {h2h}
-Reglas:
-1. No exageres ventajas pequeñas.
-2. Si edge <= 0, di NO BET.
-3. Si stake es bajo, dilo claramente.
-4. Máximo 120 palabras.
-Formato:
+Eres analista profesional. Partido: {m_l} vs {m_v}
+Datos: Prob: {p_percent:.1f}%, Cuota: {c_l}, Edge: {edge_ajustado*100:.2f}%, H2H: {h2h}
+Instrucciones: 
+1. Si edge <= 0, di NO BET.
+2. Si edge > 0, explica por qué hay valor basándote en que Poisson supera al mercado.
+3. Máximo 100 palabras.
 🎯 PICK: {pick_final}
 📈 NIVEL: {nivel}
 💰 STAKE: {stake}%
-🔬 MÉTRICAS: Prob: {p_percent:.1f}% | Cuota: {c_l} | Edge: {edge_ajustado*100:.1f}%
-📝 ANÁLISIS: [Breve explicación técnica]
 """
     
     analisis_raw = await ejecutar_ia("estratega", prompt_e)
@@ -310,12 +296,9 @@ Formato:
 
     if SISTEMA_IA["auditor"]["nodo"]:
         prompt_a = (
-            f"ERES EL AUDITOR DE RIESGO. Valida al Estratega con noticias.\n"
-            f"ANÁLISIS ESTRATEGA: '{analisis_raw}'\n"
+            f"ERES AUDITOR. Valida: '{analisis_raw}'\n"
             f"NOTICIAS:\n{contexto_noticias}\n"
-            f"1. Si no hay noticias del partido, mantén el stake.\n"
-            f"2. Si hay bajas clave en {m_l}, ordena bajar stake.\n"
-            f"3. Veredicto corto."
+            f"Resumen muy breve."
         )
         auditoria_raw = await ejecutar_ia("auditor", prompt_a)
         footer += f"\n🛡 <b>AUDITOR:</b> <code>{SISTEMA_IA['auditor']['api']}</code>"
@@ -325,7 +308,7 @@ Formato:
 
     await bot.edit_message_text(final, message.chat.id, msg_espera.message_id, parse_mode='HTML')
 
-# --- El resto de funciones se mantienen intactas según lo solicitado ---
+# --- Comandos Adicionales ---
 
 @bot.message_handler(commands=['historial'])
 async def cmd_historial(message):
@@ -451,11 +434,6 @@ async def cmd_help(message):
         "• <code>/tabla</code>: Posiciones liga.\n"
         "• <code>/equipos</code>: Lista equipos JSON.\n"
     )
-    await bot.reply_to(message, help_text, parse_mode='HTML')
-
-@bot.message_handler(commands=['help'])
-async def cmd_help(message):
-    help_text = "🤖 <b>SISTEMA V6.0 PROFESIONAL</b>\n\nLógica conservadora aplicada. Use /pronostico para empezar."
     await bot.reply_to(message, help_text, parse_mode='HTML')
 
 async def main(): 
