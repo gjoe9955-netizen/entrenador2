@@ -166,7 +166,7 @@ async def handle_pronostico(message):
         await bot.reply_to(message, "⚠️ `/pronostico Local vs Visitante`."); return
 
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
-    msg_espera = await bot.reply_to(message, "📡 Consultando APIs y Analizando xG...")
+    msg_espera = await bot.reply_to(message, "📡 Ejecutando Protocolo de Análisis Avanzado...")
 
     raw_json = requests.get(URL_JSON)
     full_data = raw_json.json()
@@ -228,25 +228,28 @@ async def handle_pronostico(message):
               f"{'✅' if check_h2h else '❌'} xG/H2H\n"
               f"————————————————————\n")
     
+    # --- PROMPT ESTRATEGA ACTUALIZADO ---
     prompt_e = (
-        f"Actúa como Analista Senior de Fútbol (Temporada 2026). "
-        f"Analiza: {m_l} vs {m_v}. Poisson Base: {p_win*100:.1f}%. Cuota: {c_l}. H2H: {h2h}.\n"
-        f"REGLAS:\n"
-        f"1. Ajusta la probabilidad usando tendencias de xG (Expected Goals) actuales.\n"
-        f"2. Si el ajuste de xG o H2H contradice el Poisson, adviértelo.\n"
-        f"3. NO expliques conceptos (No digas qué es Kelly/Poisson).\n\n"
-        f"Formato:\n🎯 PICK: {pick_final}\n📈 NIVEL: {nivel}\n💰 STAKE: {stake_final}%\n"
-        f"🔬 MÉTRICAS: Poisson {p_win*100:.1f}%, Cuota Real {c_l}, Edge {edge_real*100:.1f}%\n"
-        f"📝 ANÁLISIS: (Máximo 3 líneas sobre xG y H2H)."
+        f"ERES UN ANALISTA DE ÉLITE. Evalúa: {m_l} vs {m_v}.\n"
+        f"VARIABLES:\n- Poisson Base: {p_win*100:.1f}%\n- Cuota Mercado: {c_l}\n- Implicada: {prob_implied*100:.1f}%\n- H2H: {h2h}\n\n"
+        f"INSTRUCCIONES:\n"
+        f"1. Genera una P_Final ponderada (60% Poisson / 40% xG actual de 2026).\n"
+        f"2. Calcula la 'Cuota Justa' (1 / P_Final). Si Cuota Mercado < Cuota Justa, advierte que NO HAY VALOR.\n"
+        f"3. Si el H2H contradice la estadística, baja la confianza.\n\n"
+        f"FORMATO DE RESPUESTA:\n🎯 PICK: {pick_final}\n📈 NIVEL: {nivel}\n💰 STAKE: {stake_final}%\n"
+        f"🔬 MÉTRICAS: P_Final [X%], Cuota Justa [X], Edge [X%]\n"
+        f"📝 ANÁLISIS: (Argumento breve sobre xG, Poisson y H2H)."
     )
     
     analisis = await ejecutar_ia("estratega", prompt_e)
     footer = f"\n\n{'—'*20}\n🛰 **MODO:** xG + Poisson + Kelly"
 
+    # --- PROMPT AUDITOR ACTUALIZADO ---
     if SISTEMA_IA["auditor"]["nodo"]:
         prompt_a = (
-            f"ERES UN AUDITOR CRÍTICO. Evalúa este análisis: '{analisis}'.\n"
-            f"Busca discrepancias entre el H2H ({h2h}) y el PICK propuesto.\n"
+            f"ERES UN AUDITOR CRÍTICO. Evalúa la validez de este análisis: '{analisis}'.\n"
+            f"DATOS DE CONTROL: H2H: {h2h} | Cuota: {c_l}.\n"
+            f"REGLA: Si la probabilidad final es optimista frente al H2H, exige precaución.\n"
             f"Responde solo: VEREDICTO (APROBADO/RECHAZADO/PRECAUCIÓN) y RAZÓN (1 línea)."
         )
         auditoria = await ejecutar_ia("auditor", prompt_a)
