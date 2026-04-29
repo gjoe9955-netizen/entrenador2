@@ -91,7 +91,7 @@ def porcentaje(x): return f"{x*100:.2f}%"
 async def ejecutar_ia(rol, prompt_data):
     cfg = SISTEMA_IA[rol]
     if not cfg["nodo"]: return "IA no configurada."
-    api_key = os.getenv("SAMBA_KEY") if cfg["api"] == "SAMBA" else os.getenv("GROQ_KEY")
+    api_key = os.getenv("SAMBA_KEY") if cfg["api"] == "SAMBA" else os.getenv("GROQ_API_KEY")
     base_url = "https://api.sambanova.ai/v1" if cfg["api"] == "SAMBA" else "https://api.groq.com/openai/v1"
     try:
         client = OpenAI(api_key=api_key, base_url=base_url)
