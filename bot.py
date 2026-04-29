@@ -230,11 +230,11 @@ async def handle_pronostico(message):
               f"————————————————————\n")
     
     prompt_e = (
-        f"Analista Senior. Partido: {m_l} vs {m_v}.\n"
-        f"Poisson: {p_percent:.1f}%. Cuota: {c_l}. H2H: {h2h}.\n"
-        f"NIVEL: {nivel}. STAKE: {stake_final}%.\n\n"
-        f"Formato: NIVEL, STAKE, VALOR (4 líneas técnicas), PICK, CUOTA, EDGE."
-    )
+        f"ERES UN ANALISTA DE ÉLITE. Evalúa: {m_l} vs {m_v}.\n"
+            f"VARIABLES:\n- Poisson: {p_win*100:.1f}%\n- Cuota Mercado: {c_l}\n- H2H API: {h2h_api}\n\n"
+            f"FORMATO:\n🎯 PICK: {pick_final}\n📈 NIVEL: {nivel}\n💰 STAKE: {stake_final}%\n"
+            f"🔬 MÉTRICAS: P_Final [%], Cuota Justa, Edge [%]\n📝 ANÁLISIS: Breve."
+        )
     
     analisis = await ejecutar_ia("estratega", prompt_e)
     footer = f"\n\n{'—'*20}\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
