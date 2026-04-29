@@ -240,5 +240,16 @@
         "stake": "0%",
         "nivel": "RIESGO ALTO / SIN VALOR ⚠️",
         "status": "⏳ PENDIENTE"
+    },
+    {
+        "fecha": "2026-04-29 02:14",
+        "partido": "Sevilla FC vs Real Sociedad de Fútbol",
+        "pick": "No Bet",
+        "poisson": "32.1%",
+        "cuota": 2.48,
+        "edge": "-8.2%",
+        "stake": "0%",
+        "nivel": "RIESGO ALTO / SIN VALOR ⚠️",
+        "status": "⏳ PENDIENTE"
     }
 ]
