@@ -55,7 +55,7 @@ PROMTS_SISTEMA = {
 }
 
 MAPEO_EQUIPOS = {
-    "Athletic Club" "athletic": 77, "atleti": 78, "osasuna": 79, "espanyol": 80,
+    "athletic": 77, "atleti": 78, "osasuna": 79, "espanyol": 80,
     "barça": 81, "barcelona": 81, "getafe": 82, "real madrid": 86, 
     "rayo vallecano": 87, "levante": 88, "mallorca": 89, "real betis": 90, 
     "real sociedad": 92, "villarreal": 94, "valencia": 95, "alavés": 263, 
