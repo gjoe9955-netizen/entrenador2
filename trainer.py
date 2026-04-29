@@ -16,7 +16,7 @@ def train_spain():
         return
 
     try:
-        print("Consultando LaLiga Española y aplicando Time-Decay...")
+        print("Consultando LaLiga Española, capturando IDs y aplicando Time-Decay...")
         response = requests.get(URL, headers=HEADERS, timeout=15)
         
         if response.status_code != 200:
@@ -31,12 +31,21 @@ def train_spain():
             return
 
         goles = []
+        team_ids = {} # Diccionario para guardar ID de cada equipo
+
         for m in matches:
             if m.get('score') and m['score'].get('fullTime'):
+                home_name = m['homeTeam']['name']
+                away_name = m['awayTeam']['name']
+                
+                # Guardar IDs oficiales de la API
+                team_ids[home_name] = m['homeTeam']['id']
+                team_ids[away_name] = m['awayTeam']['id']
+
                 goles.append({
-                    'home': m['homeTeam']['name'],
-                    'away': m['awayTeam']['name'],
-                    'goals_h': m['score']['fullTime']['home'],\
+                    'home': home_name,
+                    'away': away_name,
+                    'goals_h': m['score']['fullTime']['home'],
                     'goals_a': m['score']['fullTime']['away'],
                     'date': m['utcDate']
                 })
@@ -64,9 +73,13 @@ def train_spain():
             att_a = np.average(a_df['goals_a'], weights=a_df['weight']) / avg_a if not a_df.empty else 1.0
             def_a = np.average(a_df['goals_h'], weights=a_df['weight']) / avg_h if not a_df.empty else 1.0
 
+            # Guardamos estadísticas + el ID oficial
             teams_stats[team] = {
-                "att_h": float(att_h), "def_h": float(def_h),
-                "att_a": float(att_a), "def_a": float(def_a)
+                "id_api": int(team_ids.get(team, 0)),
+                "att_h": float(att_h), 
+                "def_h": float(def_h),
+                "att_a": float(att_a), 
+                "def_a": float(def_a)
             }
 
         output = {
@@ -80,7 +93,7 @@ def train_spain():
         with open('modelo_poisson.json', 'w', encoding='utf-8') as f:
             json.dump(output, f, indent=4, ensure_ascii=False)
         
-        print(f"✅ modelo_poisson.json actualizado con éxito. Equipos: {len(teams_stats)}")
+        print(f"✅ modelo_poisson.json actualizado. Equipos con ID: {len(teams_stats)}")
 
     except Exception as e:
         print(f"❌ Error crítico: {e}")
