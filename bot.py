@@ -65,19 +65,17 @@ SISTEMA_IA = {
     "auditor": {"api": None, "nodo": None},
 
     "nodos_samba": [
-        "DeepSeek-V3.1",
-        "DeepSeek-V3.1-cb",
-        "DeepSeek-V3.2",
-        "Llama-4-Maverick-17B-128E-Instruct",
-        "Meta-Llama-3.3-70B-Instruct"
+        "DeepSeek-V3.2 [EST] | 99%",
+        "DeepSeek-V3.1 [EST] | 95%",
+        "Meta-Llama-3.3-70B [AUD] | 99%",
+        "gemma-3-12b-it [EST] | 92%"
     ],
 
     "nodos_groq": [
-        "llama-3.3-70b-versatile",
-        "groq/compound-mini",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "llama-3.1-8b-instant",
-        "groq/compound"
+        "llama-3.3-70b-versatile [EST] | 99%",
+        "qwen/qwen3-32b [EST] | 90%",
+        "meta-llama/llama-4-scout-17b-16e-instruct [AUD] | 98%",
+        "openai/gpt-oss-20b [AUD] | 94%"
     ]
 }
 
@@ -85,6 +83,9 @@ SISTEMA_IA = {
 async def ejecutar_ia(rol, prompt):
     config = SISTEMA_IA[rol]
     if not config["nodo"]: return None
+    
+    # Extraer el ID real del modelo quitando la etiqueta del botón
+    nodo_real = config["nodo"].split(" [")[0]
     
     if config["api"] == 'GROQ':
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -94,7 +95,7 @@ async def ejecutar_ia(rol, prompt):
         headers = {"Authorization": f"Bearer {SAMBA_KEY}", "Content-Type": "application/json"}
 
     payload = {
-        "model": config["nodo"],
+        "model": nodo_real,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1
     }
@@ -201,7 +202,6 @@ async def handle_pronostico(message):
     prob_implied = 1 / c_l
     edge_real = p_win - prob_implied
     
-    # Cálculo previo de Kelly para referencia en el log, aunque la IA sugerirá el suyo
     if edge_real > 0:
         kelly = ((c_l * p_win) - 1) / (c_l - 1)
         stake_referencia = round(kelly * 0.25 * 100, 2)
@@ -233,7 +233,6 @@ async def handle_pronostico(message):
               f"{'✅' if check_h2h else '❌'} H2H\n"
               f"————————————————————\n")
     
-    # PROMPT ACTUALIZADO CON CRITERIO DE KELLY
     prompt_e = (
         f"ERES UN ANALISTA DE ÉLITE. Evalúa: {m_l} vs {m_v}.\n"
         f"DATOS CLAVE:\n"
@@ -388,12 +387,15 @@ async def cb_fin(call):
 @bot.message_handler(commands=['help'])
 async def cmd_help(message):
     help_text = (
-        "🤖 <b>SISTEMA V5.1 FIX</b>\n\n"
+        "🤖 <b>SISTEMA V5.2 PRO</b>\n\n"
         "📈 <b>ANÁLISIS:</b>\n"
         "• <code>/pronostico Local vs Visitante</code>: Análisis + Kelly.\n"
         "• <code>/historial</code>: Últimos pronósticos.\n"
         "• <code>/validar</code>: Sincroniza resultados GitHub.\n"
         "• <code>/config</code>: Configura IA.\n\n"
+        "🛡 <b>ROLES:</b>\n"
+        "• <b>[EST]:</b> Estratega (Análisis matemático y Kelly).\n"
+        "• <b>[AUD]:</b> Auditor (Redacción y verificación lógica).\n\n"
         "⚽ <b>INFORMACIÓN:</b>\n"
         "• <code>/partidos</code>: Próximos encuentros.\n"
         "• <code>/tabla</code>: Posiciones liga.\n"
