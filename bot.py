@@ -58,7 +58,7 @@ async def guardar_en_github(nuevo_registro=None, historial_completo=None):
     except Exception as e:
         logging.error(f"Error GitHub: {e}")
 
-# --- Estado Global (ACTUALIZADO) ---
+# --- Estado Global ---
 SISTEMA_IA = {
     "estratega": {"api": None, "nodo": None},
     "auditor": {"api": None, "nodo": None},
@@ -151,7 +151,7 @@ async def obtener_h2h_directo(equipo_l, equipo_v):
                     if w == 'HOME_TEAM': l += 1
                     elif w == 'AWAY_TEAM': v += 1
                     else: e += 1
-                return f"H2H Real: Local {l} | Visitante {v} | Empates {e}", True
+                return f"Local {l} | Visitante {v} | Empates {e}", True
         return "H2H: Sin datos directos.", False
     except: return "H2H: Error API.", False
 
@@ -231,10 +231,10 @@ async def handle_pronostico(message):
     
     prompt_e = (
         f"ERES UN ANALISTA DE ÉLITE. Evalúa: {m_l} vs {m_v}.\n"
-            f"VARIABLES:\n- Poisson: {p_win*100:.1f}%\n- Cuota Mercado: {c_l}\n- H2H API: {h2h_api}\n\n"
-            f"FORMATO:\n🎯 PICK: {pick_final}\n📈 NIVEL: {nivel}\n💰 STAKE: {stake_final}%\n"
-            f"🔬 MÉTRICAS: P_Final [%], Cuota Justa, Edge [%]\n📝 ANÁLISIS: Breve."
-        )
+        f"VARIABLES:\n- Poisson: {p_percent:.1f}%\n- Cuota Mercado: {c_l}\n- H2H API: {h2h}\n\n"
+        f"FORMATO:\n🎯 PICK: {m_l if edge_real > 0 else 'No Bet'}\n📈 NIVEL: {nivel}\n💰 STAKE: {stake_final}%\n"
+        f"🔬 MÉTRICAS: P_Final [%], Cuota Justa, Edge [%]\n📝 ANÁLISIS: Breve."
+    )
     
     analisis = await ejecutar_ia("estratega", prompt_e)
     footer = f"\n\n{'—'*20}\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
@@ -323,7 +323,7 @@ async def cmd_equipos(message):
     equipos = ", ".join([f"`{e}`" for e in res[liga]['teams'].keys()])
     await bot.reply_to(message, f"📋 **EQUIPOS JSON:**\n\n{equipos}", parse_mode='Markdown')
 
-# --- Gestión de Nodos y Configuración ---
+# --- Gestión de Nodos y Configuración (OPTIMIZADO PARA BOTONES) ---
 @bot.message_handler(commands=['config'])
 async def cmd_config(message):
     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🧠 ASIGNAR ESTRATEGA", callback_data="set_rol_estratega"))
@@ -343,18 +343,25 @@ async def cb_api(call):
     _, _, rol, api = call.data.split('_')
     nodos = SISTEMA_IA["nodos_groq"] if api == 'GROQ' else SISTEMA_IA["nodos_samba"]
     markup = InlineKeyboardMarkup()
-    for n in nodos:
-        markup.add(InlineKeyboardButton(n, callback_data=f"save_nodo_{rol}_{api}_{n}"))
-    await bot.edit_message_text(f"Selecciona Nodo:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    # Usamos índices numéricos para el callback (ahorra espacio) pero mostramos el nombre en el botón
+    for idx, nombre in enumerate(nodos):
+        markup.add(InlineKeyboardButton(nombre, callback_data=f"sv_{rol[0]}_{api[0]}_{idx}"))
+    await bot.edit_message_text(f"Selecciona Nodo para {rol.upper()}:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('save_nodo_'))
+@bot.callback_query_handler(func=lambda call: call.data.startswith('sv_'))
 async def cb_save(call):
-    _, _, rol, api, nodo = call.data.split('_')
-    SISTEMA_IA[rol] = {"api": api, "nodo": nodo}
+    _, r_init, a_init, idx = call.data.split('_')
+    rol = "estratega" if r_init == 'e' else "auditor"
+    api = "GROQ" if a_init == 'G' else "SAMBA"
+    lista = SISTEMA_IA["nodos_groq"] if api == "GROQ" else SISTEMA_IA["nodos_samba"]
+    nodo_sel = lista[int(idx)]
+    
+    SISTEMA_IA[rol] = {"api": api, "nodo": nodo_sel}
+    
     markup = InlineKeyboardMarkup()
     if rol == "estratega": markup.add(InlineKeyboardButton("⚖️ AÑADIR AUDITOR", callback_data="set_rol_auditor"))
     markup.add(InlineKeyboardButton("🏁 FINALIZAR", callback_data="config_fin"))
-    await bot.edit_message_text(f"✅ {rol.upper()} listo: `{nodo}`", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    await bot.edit_message_text(f"✅ {rol.upper()} listo: `{nodo_sel}`", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "config_fin")
 async def cb_fin(call):
