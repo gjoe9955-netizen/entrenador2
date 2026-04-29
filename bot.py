@@ -151,9 +151,9 @@ async def obtener_h2h_directo(equipo_l, equipo_v):
                     if w == 'HOME_TEAM': l += 1
                     elif w == 'AWAY_TEAM': v += 1
                     else: e += 1
-                return f"H2H Real: Local {l} | Visitante {v} | Empates {e}", True
-        return "H2H: Sin datos directos.", False
-    except: return "H2H: Error API.", False
+                return f"Local {l} | Visitante {v} | Empates {e}", True
+        return "Sin datos directos.", False
+    except: return "Error API.", False
 
 # --- Comando Principal: Pronóstico ---
 @bot.message_handler(commands=['pronostico', 'valor'])
@@ -166,7 +166,7 @@ async def handle_pronostico(message):
         await bot.reply_to(message, "⚠️ `/pronostico Local vs Visitante`."); return
 
     l_q, v_q = [t.strip() for t in parts[1].split(" vs ")]
-    msg_espera = await bot.reply_to(message, "📡 Consultando APIs y Poisson...")
+    msg_espera = await bot.reply_to(message, "📡 Consultando APIs y Analizando xG...")
 
     raw_json = requests.get(URL_JSON)
     full_data = raw_json.json()
@@ -196,27 +196,26 @@ async def handle_pronostico(message):
             else: pa += p
 
     p_win = ph 
-    p_percent = p_win * 100
     prob_implied = 1 / c_l
     edge_real = p_win - prob_implied
     
-    if edge_real > 0:
+    # Decisión de Pick Basada en Kelly y Edge Mínimo (3%)
+    pick_final = m_l
+    if edge_real > 0.03:
         kelly = ((c_l * p_win) - 1) / (c_l - 1)
         stake_final = round(kelly * 0.25 * 100, 2)
         stake_final = max(0, min(stake_final, 5)) 
+        nivel = "DIAMANTE 💎" if edge_real > 0.07 else ("ORO 🥇" if edge_real > 0.04 else "PLATA 🥈")
     else:
         stake_final = 0
-
-    if edge_real > 0.05: nivel = "DIAMANTE 💎"
-    elif edge_real > 0.02: nivel = "ORO 🥇"
-    elif edge_real > 0: nivel = "PLATA 🥈"
-    else: nivel = "RIESGO ALTO / SIN VALOR ⚠️"
+        pick_final = "NO APOSTAR (Sin Valor)"
+        nivel = "RIESGO ALTO / SIN VALOR ⚠️"
 
     asyncio.create_task(guardar_en_github(nuevo_registro={
         "fecha": (datetime.utcnow() + timedelta(hours=OFFSET_JUAREZ)).strftime('%Y-%m-%d %H:%M'),
         "partido": f"{m_l} vs {m_v}",
-        "pick": m_l if edge_real > 0 else "No Bet",
-        "poisson": f"{p_percent:.1f}%",
+        "pick": pick_final,
+        "poisson": f"{p_win*100:.1f}%",
         "cuota": c_l,
         "edge": f"{edge_real*100:.1f}%",
         "stake": f"{stake_final}%",
@@ -225,24 +224,33 @@ async def handle_pronostico(message):
     }))
 
     header = (f"🛠 REPORTE: {'✅' if check_odds else '❌'} Cuotas | "
-              f"{'✅' if check_json else '❌'} Poisson ({p_percent:.1f}%) | "
-              f"{'✅' if check_h2h else '❌'} H2H\n"
+              f"{'✅' if check_json else '❌'} Poisson | "
+              f"{'✅' if check_h2h else '❌'} xG/H2H\n"
               f"————————————————————\n")
     
     prompt_e = (
-        f"Analista Senior. Partido: {m_l} vs {m_v}.\n"
-        f"Poisson: {p_percent:.1f}%. Cuota: {c_l}. H2H: {h2h}.\n"
-        f"NIVEL: {nivel}. STAKE: {stake_final}%.\n\n"
-        f"Formato: NIVEL, STAKE, VALOR (4 líneas técnicas), PICK, CUOTA, EDGE."
+        f"Actúa como Analista Senior de Fútbol (Temporada 2026). "
+        f"Analiza: {m_l} vs {m_v}. Poisson Base: {p_win*100:.1f}%. Cuota: {c_l}. H2H: {h2h}.\n"
+        f"REGLAS:\n"
+        f"1. Ajusta la probabilidad usando tendencias de xG (Expected Goals) actuales.\n"
+        f"2. Si el ajuste de xG o H2H contradice el Poisson, adviértelo.\n"
+        f"3. NO expliques conceptos (No digas qué es Kelly/Poisson).\n\n"
+        f"Formato:\n🎯 PICK: {pick_final}\n📈 NIVEL: {nivel}\n💰 STAKE: {stake_final}%\n"
+        f"🔬 MÉTRICAS: Poisson {p_win*100:.1f}%, Cuota Real {c_l}, Edge {edge_real*100:.1f}%\n"
+        f"📝 ANÁLISIS: (Máximo 3 líneas sobre xG y H2H)."
     )
     
     analisis = await ejecutar_ia("estratega", prompt_e)
-    footer = f"\n\n{'—'*20}\n🛰 **ESTRATEGA:** `{SISTEMA_IA['estratega']['api']}` ({SISTEMA_IA['estratega']['nodo']})"
+    footer = f"\n\n{'—'*20}\n🛰 **MODO:** xG + Poisson + Kelly"
 
     if SISTEMA_IA["auditor"]["nodo"]:
-        prompt_a = f"Auditor. Valida: '{analisis}'. Poisson: {p_percent:.1f}%. Reporta VEREDICTO."
+        prompt_a = (
+            f"ERES UN AUDITOR CRÍTICO. Evalúa este análisis: '{analisis}'.\n"
+            f"Busca discrepancias entre el H2H ({h2h}) y el PICK propuesto.\n"
+            f"Responde solo: VEREDICTO (APROBADO/RECHAZADO/PRECAUCIÓN) y RAZÓN (1 línea)."
+        )
         auditoria = await ejecutar_ia("auditor", prompt_a)
-        footer += f"\n🛡 **AUDITOR:** `{SISTEMA_IA['auditor']['api']}` ({SISTEMA_IA['auditor']['nodo']})"
+        footer += f"\n🛡 **AUDITOR:** `{SISTEMA_IA['auditor']['nodo']}`"
         final = f"{header}{analisis}\n\n{auditoria}{footer}"
     else:
         final = f"{header}{analisis}{footer}"
@@ -281,7 +289,7 @@ async def cmd_validar(message):
                     h_api, a_api = m['homeTeam']['shortName'].lower(), m['awayTeam']['shortName'].lower()
                     if h_api in item['partido'].lower() and a_api in item['partido'].lower():
                         res = m['score']['winner']
-                        if item['pick'] == "No Bet": item['status'] = "➖ VOID"
+                        if "NO APOSTAR" in item['pick']: item['status'] = "➖ VOID"
                         elif (res == 'HOME_TEAM' and h_api in item['pick'].lower()) or \
                              (res == 'AWAY_TEAM' and a_api in item['pick'].lower()):
                             item['status'] = "✅ WIN"
@@ -323,7 +331,7 @@ async def cmd_equipos(message):
     equipos = ", ".join([f"`{e}`" for e in res[liga]['teams'].keys()])
     await bot.reply_to(message, f"📋 **EQUIPOS JSON:**\n\n{equipos}", parse_mode='Markdown')
 
-# --- Gestión de Nodos y Configuración (Corrección de callback_data) ---
+# --- Gestión de Nodos ---
 @bot.message_handler(commands=['config'])
 async def cmd_config(message):
     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🧠 ASIGNAR ESTRATEGA", callback_data="rol_est"))
@@ -331,7 +339,7 @@ async def cmd_config(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rol_'))
 async def cb_rol(call):
-    rol_code = call.data.split('_')[-1] # 'est' o 'aud'
+    rol_code = call.data.split('_')[-1]
     markup = InlineKeyboardMarkup().row(
         InlineKeyboardButton("Groq", callback_data=f"api_{rol_code}_G"),
         InlineKeyboardButton("SambaNova", callback_data=f"api_{rol_code}_S")
@@ -344,7 +352,6 @@ async def cb_api(call):
     nodos = SISTEMA_IA["nodos_groq"] if api_code == 'G' else SISTEMA_IA["nodos_samba"]
     markup = InlineKeyboardMarkup()
     for n in nodos:
-        # 'sv' es el prefijo para save, reducimos todo para que quepa el nombre del nodo
         markup.add(InlineKeyboardButton(n, callback_data=f"sv_{rol_code}_{api_code}_{n}"[:64]))
     await bot.edit_message_text(f"Selecciona Nodo:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
@@ -353,9 +360,7 @@ async def cb_save(call):
     _, rol_code, api_code, nodo = call.data.split('_')
     rol = "estratega" if rol_code == "est" else "auditor"
     api = "GROQ" if api_code == "G" else "SAMBA"
-    
     SISTEMA_IA[rol] = {"api": api, "nodo": nodo}
-    
     markup = InlineKeyboardMarkup()
     if rol == "estratega": markup.add(InlineKeyboardButton("⚖️ AÑADIR AUDITOR", callback_data="rol_aud"))
     markup.add(InlineKeyboardButton("🏁 FINALIZAR", callback_data="config_fin"))
@@ -368,12 +373,11 @@ async def cb_fin(call):
 @bot.message_handler(commands=['help'])
 async def cmd_help(message):
     help_text = (
-        "🤖 **SISTEMA V5.0 GROQ-SAMBA**\n\n"
+        "🤖 **SISTEMA V6.0 (xG + Kelly)**\n\n"
         "📈 **ANÁLISIS:**\n"
-        "• `/pronostico Local vs Visitante`: Análisis + Kelly.\n"
+        "• `/pronostico L vs V`: Análisis xG + Poisson + Kelly.\n"
         "• `/historial`: Ver pronósticos y estados.\n"
-        "• `/validar`: Cierra resultados pendientes.\n"
-        "• `/config`: Configurar Groq/SambaNova.\n\n"
+        "• `/validar`: Cierra resultados pendientes.\n\n"
         "⚽ **INFO:** `/partidos`, `/tabla`, `/equipos`."
     )
     await bot.reply_to(message, help_text, parse_mode='Markdown')
