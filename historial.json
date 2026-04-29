@@ -86,5 +86,16 @@
         "stake": "0%",
         "nivel": "RIESGO ALTO / SIN VALOR ⚠️",
         "status": "⏳ PENDIENTE"
+    },
+    {
+        "fecha": "2026-04-28 23:32",
+        "partido": "Girona FC vs RCD Mallorca",
+        "pick": "NO APOSTAR (Sin Valor)",
+        "poisson": "51.0%",
+        "cuota": 2.04,
+        "edge": "2.0%",
+        "stake": "0%",
+        "nivel": "RIESGO ALTO / SIN VALOR ⚠️",
+        "status": "⏳ PENDIENTE"
     }
 ]
