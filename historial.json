@@ -330,5 +330,16 @@
         "stake": "1.32%",
         "nivel": "ORO 🥇",
         "status": "⏳ PENDIENTE"
+    },
+    {
+        "fecha": "2026-04-29 12:02",
+        "partido": "Girona FC vs RCD Mallorca",
+        "pick": "Girona FC",
+        "poisson": "51.0%",
+        "cuota": 2.07,
+        "edge": "2.7%",
+        "stake": "1.32%",
+        "nivel": "ORO 🥇",
+        "status": "⏳ PENDIENTE"
     }
 ]
