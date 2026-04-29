@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 TOKEN = os.getenv('TOKEN_TELEGRAM')
-GROQ_KEY = os.getenv('GROQ_KEY')
+GROQ_KEY = os.getenv('GROQ_API_KEY')
 SAMBA_KEY = os.getenv('SAMBA_KEY')
 FOOTBALL_DATA_KEY = os.getenv('FOOTBALL_DATA_KEY')
 ODDS_API_KEY = os.getenv('ODDS_API_KEY')
