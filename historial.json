@@ -385,5 +385,16 @@
         "stake": "0%",
         "nivel": "NO BET 🚫",
         "status": "⏳ PENDIENTE"
+    },
+    {
+        "fecha": "2026-04-30 00:13",
+        "partido": "Getafe CF vs Rayo Vallecano de Madrid",
+        "pick": "No Bet",
+        "poisson": "46.6%",
+        "cuota": 2.05,
+        "edge": "-0.1%",
+        "stake": "0%",
+        "nivel": "NO BET 🚫",
+        "status": "⏳ PENDIENTE"
     }
 ]
