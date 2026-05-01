@@ -454,5 +454,16 @@
         "nivel": "DIAMANTE 💎",
         "status": "✅ WIN",
         "marcador_real": "0-1"
+    },
+    {
+        "fecha": "2026-05-01 12:50",
+        "partido": "Girona FC vs RCD Mallorca",
+        "pick": "No Bet",
+        "poisson": "51.1%",
+        "cuota": 1.94,
+        "edge": "-0.1%",
+        "stake": "0%",
+        "nivel": "NO BET 🚫",
+        "status": "⏳ PENDIENTE"
     }
 ]
