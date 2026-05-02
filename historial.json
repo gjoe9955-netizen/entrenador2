@@ -464,7 +464,8 @@
         "edge": "-0.1%",
         "stake": "0%",
         "nivel": "NO BET 🚫",
-        "status": "⏳ PENDIENTE"
+        "status": "➖ VOID",
+        "marcador_real": "0-1"
     },
     {
         "fecha": "2026-05-01 14:30",
@@ -475,6 +476,7 @@
         "edge": "31.4%",
         "stake": "2.5%",
         "nivel": "DIAMANTE 💎",
-        "status": "⏳ PENDIENTE"
+        "status": "❌ LOSS",
+        "marcador_real": "0-1"
     }
 ]
